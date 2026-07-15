@@ -62,12 +62,12 @@ export function Auth({ onClose }: { onClose?: () => void }) {
   const labelClass = 'block text-[10px] font-bold uppercase tracking-[.2em] text-slate-400';
 
   return (
-    <main className={`grid place-items-center overflow-y-auto bg-[#070b0f] px-4 py-10 text-slate-100 ${onClose ? 'fixed inset-0 z-50 min-h-full bg-[#070b0f]/95 backdrop-blur-sm' : 'min-h-screen'}`}>
+    <main className={`grid place-items-center overflow-y-auto bg-[#070b0f] px-4 py-10 text-slate-100 ${onClose ? 'fixed inset-0 z-[110] min-h-full bg-[#070b0f]/95 backdrop-blur-sm' : 'min-h-screen'}`}>
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_25%,rgba(45,212,191,.12),transparent_38%)]" />
       <section className="relative w-full max-w-md border border-white/10 bg-[#0d151b]/95 p-7 shadow-[0_30px_100px_rgba(0,0,0,.7)] md:p-10">
         {onClose && <button type="button" onClick={onClose} aria-label="Закрыть" className="absolute right-4 top-4 grid h-8 w-8 place-items-center border border-white/10 text-lg text-slate-500 transition hover:border-teal-300/40 hover:text-teal-200">×</button>}
         <div className="mb-8 text-center">
-          <p className="mb-3 text-[10px] font-black uppercase tracking-[.45em] text-teal-300">Ashfall</p>
+          <p className="mb-3 text-[10px] font-black uppercase tracking-[.45em] text-amber-300">False Knight</p>
           <h1 className="text-3xl font-black uppercase tracking-tight">{mode === 'signup' ? 'Создать аккаунт' : 'Вернуться в бой'}</h1>
           <p className="mt-3 text-sm leading-6 text-slate-500">{mode === 'signup' ? 'Зарегистрируйтесь, чтобы начать спуск.' : 'Войдите в свой аккаунт, чтобы продолжить.'}</p>
         </div>
