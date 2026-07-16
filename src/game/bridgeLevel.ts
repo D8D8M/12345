@@ -13,8 +13,8 @@ export type BridgeLevel = {
 export const createBridgeLevel = (): BridgeLevel => {
   // Massive piers are the only solid ground. Nothing joins them below the screen.
   const terrain: BridgeBox[] = [
-    { x: 0, y: 610, w: 430, h: 390 },
-    { x: 720, y: 650, w: 240, h: 350 },
+    // 4B opens with a full-width boss arena; the broken route starts after it.
+    { x: 0, y: 610, w: 1000, h: 390 },
     { x: 1290, y: 585, w: 310, h: 415 },
     { x: 1940, y: 675, w: 225, h: 325 },
     { x: 2510, y: 600, w: 330, h: 400 },
@@ -24,7 +24,6 @@ export const createBridgeLevel = (): BridgeLevel => {
   ];
 
   const platforms: BridgePlatform[] = [
-    { x: 465, y: 555, w: 210, h: 18, kind: 'suspension' },
     { x: 1015, y: 525, w: 205, h: 22, kind: 'rubble' },
     { x: 1645, y: 535, w: 235, h: 18, kind: 'suspension' },
     { x: 2205, y: 575, w: 245, h: 22, kind: 'rubble' },

@@ -30,8 +30,13 @@ export const createMinesLevel = (rooms: MineRoom[], columns: number): MinesLevel
     platforms.push({ x: room.x + 62, y: upperY, w: 270, h: 18 }, { x: room.x + 390, y: upperY, w: 348, h: 18 });
     platforms.push({ x: room.x + 145, y: floorY - 112, w: 120, h: 16 }, { x: room.x + 535, y: floorY - 112, w: 120, h: 16 });
     if (room.id % 2 === 0) rails.push({ x: room.x + 45, y: floorY - 7, w: room.w - 90 });
-    if (room.id % 3 === 1 && room.col > 0 && room.col < columns - 1) {
-      obstacles.push({ x: room.x + 344, y: floorY - 94, w: 104, h: 94, kind: room.id % 2 ? 'cart' : 'barricade' });
+    const hasVerticalPassage = room.connections.has(room.id - columns) || room.connections.has(room.id + columns);
+    if (room.id % 3 === 1 && room.col > 0 && room.col < columns - 1 && !hasVerticalPassage) {
+      // Vertical exits use the middle of a room. The old x + 344 placement
+      // put a solid cart directly inside that shaft and could make the route
+      // impossible. Keep dressing out of shaft rooms and off the centre line.
+      const obstacleX = room.id % 2 ? room.x + 525 : room.x + 170;
+      obstacles.push({ x: obstacleX, y: floorY - 94, w: 104, h: 94, kind: room.id % 2 ? 'cart' : 'barricade' });
     }
     for (let x = room.x + 110; x < room.x + room.w - 70; x += 205) {
       supports.push({ x, y: room.y + 52, w: 22, h: room.h - 94 });

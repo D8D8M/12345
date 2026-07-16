@@ -8,6 +8,39 @@ html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: #090e12; overscroll-behavior: none; }
 button { font: inherit; cursor: pointer; }
 
+.mobile-controls { display: none; }
+@media (hover: none) and (pointer: coarse), (max-width: 820px) {
+  .desktop-weapon-slots { display: none; }
+  canvas { touch-action: none; }
+  .mobile-controls { position: absolute; inset: 0; z-index: 40; display: block; pointer-events: none; touch-action: none; user-select: none; }
+  .mobile-rotate-screen { display: none; }
+  .mobile-control-button { pointer-events: auto; touch-action: none; border: 1px solid rgba(226,232,240,.38); color: #f8fafc; background: rgba(4,12,18,.68); box-shadow: inset 0 0 14px rgba(125,211,252,.08), 0 3px 12px rgba(0,0,0,.45); backdrop-filter: blur(4px); -webkit-tap-highlight-color: transparent; }
+  .mobile-control-button:active { background: rgba(45,212,191,.3); border-color: rgba(153,246,228,.95); transform: scale(.94); }
+  .mobile-dpad { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(76px, calc(env(safe-area-inset-bottom) + 68px)); width: 132px; height: 132px; }
+  .mobile-dpad .mobile-control-button { position: absolute; width: 46px; height: 46px; border-radius: 12px; font-size: 25px; font-weight: 900; }
+  .mobile-dpad-up { left: 43px; top: 0; }
+  .mobile-dpad-left { left: 0; top: 43px; }
+  .mobile-dpad-right { right: 0; top: 43px; }
+  .mobile-dpad-down { left: 43px; bottom: 0; }
+  .mobile-weapon-slots { position: absolute; left: 50%; bottom: max(8px, env(safe-area-inset-bottom)); display: flex; gap: 5px; transform: translateX(-50%); }
+  .mobile-weapon-slot { position: relative; width: 43px; height: 43px; border-radius: 8px; font-size: 22px; }
+  .mobile-weapon-slot.is-active { border-color: #5eead4; background: rgba(20,184,166,.28); box-shadow: 0 0 16px rgba(45,212,191,.48); }
+  .mobile-weapon-slot.is-cooling { opacity: .55; }
+  .mobile-actions { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(68px, calc(env(safe-area-inset-bottom) + 60px)); width: 174px; height: 146px; }
+  .mobile-action { position: absolute; width: 72px; height: 72px; border-radius: 50%; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+  .mobile-action-jump { right: 0; bottom: 0; border-color: rgba(103,232,249,.75); }
+  .mobile-action-heal { left: 5px; top: 0; width: 62px; height: 62px; border-color: rgba(134,239,172,.7); color: #dcfce7; }
+  .mobile-action-attack { right: 0; top: 0; border-color: rgba(251,191,36,.75); color: #fef3c7; }
+  .mobile-action-dash { left: 0; bottom: 0; width: 66px; height: 66px; border-color: rgba(192,132,252,.75); color: #f3e8ff; }
+}
+@media (hover: none) and (pointer: coarse) and (orientation: portrait), (max-width: 820px) and (orientation: portrait) {
+  .mobile-dpad, .mobile-weapon-slots, .mobile-actions { display: none; }
+  .mobile-rotate-screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 28px; pointer-events: auto; background: radial-gradient(circle at 50% 42%, #162936, #05090d 68%); text-align: center; }
+  .mobile-rotate-icon { display: grid; width: 74px; height: 74px; place-items: center; margin-bottom: 10px; border: 2px solid rgba(94,234,212,.65); border-radius: 20px; color: #99f6e4; font-size: 48px; box-shadow: 0 0 28px rgba(45,212,191,.18); }
+  .mobile-rotate-screen strong { color: #f8fafc; font-size: 24px; text-transform: uppercase; letter-spacing: .06em; }
+  .mobile-rotate-screen small { max-width: 260px; color: #94a3b8; font-size: 13px; line-height: 1.5; }
+}
+
 /* Жанровый ярлык в главном меню скрыт — остаются название и сюжет. */
 section.aspect-video > div.absolute.inset-0.z-20 > div.grid > div.max-w-2xl > p:first-child { display: none; }
 
