@@ -4,12 +4,15 @@ import type { Session } from '@supabase/supabase-js';
 import { Auth } from './components/Auth';
 import { drawStageFourBoss } from './components/StageFourBossModels';
 import { drawWalkingLegs } from './game/drawWalkingLegs';
+import { drawShadowDashGhost, type ShadowDashGhost } from './game/drawShadowDash';
 import { drawEnemyAttack, drawPlayerBow, drawPlayerSword, enemyAttackDuration, enemyWeaponFor } from './game/drawCombatAnimations';
+import { drawPlayerCape, drawPlayerKnight, drawPlayerLungePose } from './game/drawPlayerKnight';
 import { createTeleportPortals, drawTeleportPortal } from './components/TeleportPortals';
 import { supabase } from './lib/supabase';
 import { createSwampLevel, SWAMP_WORLD, type SwampPlatform } from './game/swampLevel';
+import { createGasBubbles, createSinkingPlatforms, updateGasBubble, updateSinkingPlatform } from './game/swampHazards';
 import { drawMines } from './game/drawMines';
-import { BRIDGE_WORLD, createBridgeLevel, type BridgePlatform } from './game/bridgeLevel';
+import { BRIDGE_WORLD, bridgeWindAmount, createBridgeLevel, type BridgePlatform } from './game/bridgeLevel';
 import { createMinesLevel, MINES_WORLD } from './game/minesLevel';
 import { createClockTowerLevel, CLOCK_TOWER_WORLD, type ClockPlatform } from './game/clockTowerLevel';
 import { createCryptLevel, CRYPT_WORLD } from './game/cryptLevel';
@@ -18,6 +21,10 @@ import { isPlatformPlacementSafe, placePlatformsSafely } from './game/platformPl
 import { drawCastleBackdrop } from './game/drawCastle';
 import { MobileControls } from './components/MobileControls';
 import { createGateFragments, drawGateFragments, updateGateFragments, type GateFragment } from './game/prisonGate';
+import { drawEnvironmentTile, type EnvironmentTileStyle } from './game/drawEnvironmentTile';
+import { drawCryptMechanics, drawMineMechanics, ghostPlatformVisible } from './game/drawUndergroundMechanics';
+import { createCastleMirrors, createCrossbowStatues, createThroneColumns, drawCastleMirror, drawCrossbowStatue, drawThroneColumn } from './game/finalLocationMechanics';
+import { drawParallaxBackground, drawParallaxLayers } from './game/drawParallaxBackground';
 
 type Hud = { hp: number; maxHp: number; shards: number; kills: number; grenade: number; trap: number; message: string };
 type Box = { x: number; y: number; w: number; h: number };
@@ -58,6 +65,28 @@ const ACHIEVEMENTS = [
   { id: 'reality_hack', icon: '👾', title: 'Взлом реальности', description: 'Активировать Debug-панель или чит.', secret: true },
 ] as const;
 type AchievementId = typeof ACHIEVEMENTS[number]['id'];
+
+const ENVIRONMENT_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
+  left: `${(index * 37 + 11) % 100}%`,
+  size: 1 + (index % 4) * .75,
+  duration: 12 + (index % 7) * 2.2,
+  delay: -(index * 1.73) % 18,
+  drift: `${((index * 23) % 70) - 35}px`,
+}));
+
+function EnvironmentParticles() {
+  return <div className="environment-particles" aria-hidden="true">
+    {ENVIRONMENT_PARTICLES.map((particle, index) => <i key={index} style={{
+      left: particle.left,
+      width: `${particle.size}px`,
+      height: `${particle.size}px`,
+      animationDuration: `${particle.duration}s`,
+      animationDelay: `${particle.delay}s`,
+      '--particle-drift': particle.drift,
+    } as React.CSSProperties}/>)}
+  </div>;
+}
+
 const MAX_PERMANENT_MASKS = 5;
 const SAVE_SLOT_COUNT = 4;
 const loadAchievements = (): AchievementId[] => {
@@ -254,7 +283,7 @@ export default function App() {
     // keep their larger room scale, while Cells reads as one continuous tilemap.
     const ROOM_COLS = throneScene || clockLayout ? 1 : castleLayout ? 5 : bridgeLayout ? 5 : swampLayout ? 10 : mineLayout ? 5 : prisonLayout ? 5 : cryptLayout ? 5 : 6;
     const ROOM_ROWS = throneScene || swampLayout || bridgeLayout ? 1 : castleLayout ? 4 : clockLayout ? 8 : mineLayout || prisonLayout ? 4 : 5;
-    const roomW = throneScene ? 1480 : castleLayout ? CASTLE_WORLD.width / ROOM_COLS : bridgeLayout ? BRIDGE_WORLD.width / ROOM_COLS : clockLayout ? CLOCK_TOWER_WORLD.width : swampLayout ? 700 : mineLayout ? MINES_WORLD.width / ROOM_COLS : prisonLayout ? 620 : cryptLayout ? CRYPT_WORLD.width / ROOM_COLS : 820;
+    const roomW = throneScene ? 2100 : castleLayout ? CASTLE_WORLD.width / ROOM_COLS : bridgeLayout ? BRIDGE_WORLD.width / ROOM_COLS : clockLayout ? CLOCK_TOWER_WORLD.width : swampLayout ? 700 : mineLayout ? MINES_WORLD.width / ROOM_COLS : prisonLayout ? 620 : cryptLayout ? CRYPT_WORLD.width / ROOM_COLS : 820;
     const roomH = throneScene ? 820 : castleLayout ? CASTLE_WORLD.height / ROOM_ROWS : bridgeLayout ? BRIDGE_WORLD.height : clockLayout ? CLOCK_TOWER_WORLD.height / ROOM_ROWS : swampLayout ? SWAMP_WORLD.height : mineLayout ? MINES_WORLD.height / ROOM_ROWS : prisonLayout ? 500 : cryptLayout ? CRYPT_WORLD.height / ROOM_ROWS : 620, roomMargin = prisonLayout || swampLayout || mineLayout || clockLayout || cryptLayout || bridgeLayout || castleLayout ? 0 : 60;
     const initialRoomId = castleLayout ? ROOM_COLS * (ROOM_ROWS - 1) + Math.floor(ROOM_COLS / 2) : clockLayout ? ROOM_ROWS - 1 : throneScene || cryptLayout || swampLayout || bridgeLayout ? 0 : ROOM_COLS;
     const worldW = roomMargin * 2 + ROOM_COLS * roomW, worldH = roomMargin * 2 + ROOM_ROWS * roomH;
@@ -446,9 +475,9 @@ export default function App() {
     }
     const cryptLevel = cryptLayout ? createCryptLevel() : null;
     if (cryptLevel) {
-      terrain.splice(0, terrain.length, ...cryptLevel.boundary, ...cryptLevel.terraces);
+      terrain.splice(0, terrain.length, ...cryptLevel.boundary, ...cryptLevel.terraces, ...cryptLevel.crumblingSlabs);
       ceilings.splice(0); dividers.splice(0);
-      oneWays.splice(0, oneWays.length, ...cryptLevel.platforms);
+      oneWays.splice(0, oneWays.length, ...cryptLevel.platforms, ...cryptLevel.ghostPlatforms);
     }
     const bridgeLevel = bridgeLayout ? createBridgeLevel() : null;
     const bridgePlatforms: BridgePlatform[] = bridgeLevel?.platforms ?? [];
@@ -520,6 +549,14 @@ export default function App() {
     if (clockLevel) oneWays.push(...clockLevel.exitPlatforms);
     const solids: Box[] = [...terrain, ...ceilings, ...dividers];
     const projectileBlockers = [...solids, ...oneWays];
+    // The throne finale is a second chamber behind the boss arena. The upper
+    // divider always remains solid; only its floor-level gate opens on victory.
+    const throneRoomDivider: Box | null = throneScene ? { x: 1050, y: wall, w: wall, h: roomH - wall * 2 - 170 } : null;
+    const throneArenaGate: Box | null = throneScene ? { x: 1050, y: roomH - wall - 170, w: wall, h: 170 } : null;
+    if (throneRoomDivider && throneArenaGate) {
+      solids.push(throneRoomDivider, throneArenaGate);
+      projectileBlockers.push(throneRoomDivider, throneArenaGate);
+    }
     if (cryptLevel) for (const secret of cryptLevel.secrets) { solids.push(secret.wall); projectileBlockers.push(secret.wall); }
     type PrisonGate = Box & { opened: boolean };
     // A few connections begin behind iron cell doors. They are real collision
@@ -541,14 +578,13 @@ export default function App() {
     type EnemyKind = 'zombie' | 'crossbow' | 'shield' | 'bomber' | 'mage' | 'totem' | 'slime' | 'flyer' | 'wraith' | 'boss' | 'rightHand';
     type EnemyVariant = 'rottenPrisoner' | 'cappedArcher' | 'marshSlime' | 'swampTotem' | 'bogShaman' | 'blindMiner' | 'dynamiteTosser' | 'minecartDefender' | 'clockworkSoldier' | 'gearFlyer' | 'towerSniper' | 'wraith' | 'necromancer' | 'cryptTotem' | 'bridgeKnight' | 'gargoyleBomber' | 'royalGuard' | 'royalSorcerer' | 'cryptWarden' | 'bridgeColossus' | 'boss' | 'rightHand';
     type Enemy = Box & { kind: EnemyKind; variant: EnemyVariant; name: string; vx: number; vy: number; patrolSpeed: number; hp: number; maxHp: number; left: number; right: number; homeY: number; facing: number; alert: number; alertTimer: number; sawPlayer: boolean; turnDelay: number; hurt: number; attack: number; cooldown: number; blocked: number; stunned: number; frozen?: number; guardTriggered: boolean; defeated: boolean; dead: boolean; dormant?: boolean; specialAttack?: 1 | 2; specialPhase?: number };
-    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean };
+    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'trapArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean };
     type RockWarning = Box & { life: number; delay: number };
     type BossWarning = Box & { life: number; delay: number; hit: boolean; kind: 'spike' | 'geyser' };
     type Hazard = Box & { life: number; kind: 'poison'; tick: number; delay: number };
     type ShardDrop = Box & { vx: number; vy: number; value: number; life: number };
     type Trap = Box & { life: number; damage: number; triggered: boolean };
-    type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
-    type PlayerGhost = { x: number; y: number; facing: number; life: number };
+    type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number; maxLife?: number; shape?: 'square' | 'smoke' | 'shard'; rotation?: number; spin?: number };
     type Explosion = { x: number; y: number; life: number; maxLife: number; radius: number; kind: 'fire' | 'freeze' };
     type Door = Box & { opening: number; destination: Exclude<LocationKind, 'prison'>; label: string };
     type PowerUp = Box & { kind: 'health'; collected: boolean; phase: number };
@@ -566,14 +602,9 @@ export default function App() {
     const startRoomId = randomSpawnLayout && !cryptLayout
       ? rooms[Math.floor(Math.random() * rooms.length)].id
       : initialRoomId;
-    const cryptSpawnSpots = cryptLevel ? [
-      { x: 120, y: 509 }, { x: 1320, y: 679 }, { x: 2420, y: 849 },
-      { x: 1660, y: 1214 }, { x: 180, y: 1414 }, { x: 720, y: 1834 },
-      { x: 2200, y: 2019 }, { x: 1360, y: 2384 }, { x: 2700, y: 2689 },
-    ] : [];
-    const cryptSpawnSpot = cryptSpawnSpots.length
-      ? cryptSpawnSpots[Math.floor(Math.random() * cryptSpawnSpots.length)]
-      : undefined;
+    // The crypt opens directly in the Warden's arena: the player appears on
+    // the safe left side, facing the boss on the right.
+    const cryptSpawnSpot = cryptLevel ? { x: 120, y: 509 } : undefined;
     const roomDistance = Array.from({ length: rooms.length }, () => Number.POSITIVE_INFINITY);
     const routeParent = Array.from({ length: rooms.length }, () => -1);
     roomDistance[startRoomId] = 0;
@@ -638,7 +669,7 @@ export default function App() {
         w: 58, h: 72, opening: 0, destination: routeDestinations[index], label: LOCATION_NAMES[routeDestinations[index]],
       };
     });
-    const stageTwoBossFight = location === 'swamps' || location === 'mines' || location === 'castle';
+    const stageTwoBossFight = location === 'swamps' || location === 'mines';
     let stageTwoBossRoom = stageTwoBossFight ? (exitRooms[0] || rooms[rooms.length - 1]) : null;
     const bossRoomGates = (room: Room): Box[] => swampLayout ? [
       // The final swamp chamber stays open while exploring. Touching its door
@@ -651,6 +682,7 @@ export default function App() {
       ...(room.connections.has(room.id + ROOM_COLS) ? [{ x: room.x + roomW / 2 - verticalGap / 2, y: room.y + roomH - wall, w: verticalGap, h: wall }] : []),
     ];
     let stageTwoArenaGates: Box[] = stageTwoBossRoom ? bossRoomGates(stageTwoBossRoom) : [];
+    if (throneArenaGate) stageTwoArenaGates.push(throneArenaGate);
     // Keep one complete route from the spawn to every exit free of unavoidable hazards.
     const safeRouteRooms = new Set<number>([startRoomId]);
     for (const exitRoom of exitRooms) {
@@ -722,15 +754,21 @@ export default function App() {
       if (x === undefined) return [];
       const elite = variant === 'royalGuard' || variant === 'royalSorcerer', hp = Math.round((kind === 'totem' ? 90 : elite ? 145 : kind === 'mage' ? 68 : kind === 'slime' ? 38 : 58) * enemyHealthScale);
       const speed = variant === 'rottenPrisoner' ? 42 : variant === 'blindMiner' ? 105 : variant === 'clockworkSoldier' ? 125 : variant === 'royalGuard' ? 105 : kind === 'shield' ? 32 : kind === 'bomber' ? 28 : kind === 'slime' ? 55 : 0;
-      const flying = kind === 'flyer' || kind === 'wraith' || variant === 'gargoyleBomber';
+      // Only true aerial archetypes ignore gravity. Bridge gargoyles use the
+      // same ground and one-way platform collisions as the bridge knights.
+      const flying = kind === 'flyer' || kind === 'wraith';
       return [{ kind, variant, name, x, y: flying ? platform.y - h - 100 : platform.y - h, w, h, vx: speed * (Math.random() < .5 ? -1 : 1), vy: 0, patrolSpeed: speed, hp, maxHp: hp, left, right, homeY: flying ? platform.y - h - 100 : platform.y - h, facing: 1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: .5 + Math.random(), blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false }];
     });
-    const bossLocation = location === 'swamps' || location === 'mines' || location === 'castle';
+    const bossLocation = location === 'swamps' || location === 'mines';
     if (bossLocation) {
-      const bossRoom = exitRooms[0] || rooms[rooms.length - 1], kind: EnemyKind = location === 'castle' ? 'rightHand' : 'boss';
-      const bossHp = kind === 'rightHand' ? Math.round(620 * enemyHealthScale) : 500, bossY = swampLayout ? 3235 - 78 : bossRoom.y + roomH - wall - 78;
-      const bossName = location === 'swamps' ? 'БОЛОТНЫЙ ГИГАНТ' : location === 'mines' ? 'КАМЕННЫЙ ГОЛЕМ' : "The King's Right Hand";
-      enemies.push({ kind, variant: kind, name: bossName, x: bossRoom.x + roomW / 2, y: bossY, w: 58, h: 78, vx: 0, vy: 0, patrolSpeed: kind === 'rightHand' ? 92 : 72, hp: bossHp, maxHp: bossHp, left: bossRoom.x + wall + 20, right: bossRoom.x + roomW - wall - 20, homeY: bossY, facing: -1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: 1, blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, dormant: true });
+      const bossRoom = exitRooms[0] || rooms[rooms.length - 1], kind: EnemyKind = 'boss';
+      const bossHp = 500, bossY = swampLayout ? 3235 - 78 : bossRoom.y + roomH - wall - 78;
+      const bossName = location === 'swamps' ? 'БОЛОТНЫЙ ГИГАНТ' : 'КАМЕННЫЙ ГОЛЕМ';
+      enemies.push({ kind, variant: kind, name: bossName, x: bossRoom.x + roomW / 2, y: bossY, w: 58, h: 78, vx: 0, vy: 0, patrolSpeed: 72, hp: bossHp, maxHp: bossHp, left: bossRoom.x + wall + 20, right: bossRoom.x + roomW - wall - 20, homeY: bossY, facing: -1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: 1, blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, dormant: true });
+    }
+    if (throneScene) {
+      const bossY = startRoom.y + roomH - wall - 78;
+      enemies.push({ kind: 'rightHand', variant: 'rightHand', name: "The King's Right Hand", x: startRoom.x + 650, y: bossY, w: 58, h: 78, vx: 0, vy: 0, patrolSpeed: 92, hp: Math.round(620 * enemyHealthScale), maxHp: Math.round(620 * enemyHealthScale), left: startRoom.x + wall + 190, right: startRoom.x + 900, homeY: bossY, facing: -1, alert: .65, alertTimer: .65, sawPlayer: true, turnDelay: 0, hurt: 0, attack: 0, cooldown: .8, blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, dormant: false });
     }
     if (stageFourBossFight) {
       const variant: EnemyVariant = location === 'crypt' ? 'cryptWarden' : 'bridgeColossus';
@@ -755,13 +793,16 @@ export default function App() {
         ally.left = Math.max(ally.left, totem.x - 125); ally.right = Math.min(ally.right, totem.x + totem.w + 125);
       }
     }
-    const player = { x: spawnX, y: spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, bounceLock: 0, bow: 0, bowMax: 0, guard: 0, guardAge: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, trailTimer: 0, dustTimer: 0, dead: false };
-    const throne = { x: startRoom.x + roomW / 2 - 56, y: startRoom.y + roomH - wall - 150, w: 112, h: 150 };
+    const player = { x: spawnX, y: spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, bounceLock: 0, bow: 0, bowMax: 0, guard: 0, guardAge: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, landSquashMax: 0, trailTimer: 0, dustTimer: 0, dead: false };
+    const castleMirrors = castleLayout ? createCastleMirrors(rooms, roomW, roomH) : [];
+    const crossbowStatues = castleLayout ? createCrossbowStatues(rooms, roomW, roomH) : [];
+    const throneColumns = throneScene ? createThroneColumns(startRoom.y + wall, startRoom.y + roomH - wall) : [];
+    const throne = { x: startRoom.x + roomW - wall - 300, y: startRoom.y + roomH - wall - 150, w: 112, h: 150 };
     const throneGate = { x: startRoom.x + roomW - wall - 54, y: startRoom.y + roomH - wall - 150, w: 54, h: 150 };
-    const royalArmor = { x: startRoom.x + 355, y: startRoom.y + roomH - wall - 74, w: 45, h: 74 };
+    const royalArmor = { x: throne.x - 150, y: startRoom.y + roomH - wall - 74, w: 45, h: 74 };
     const checkpoint = { x: player.x, y: player.y };
     let hazardRespawn = { ...checkpoint };
-    const teleportPortals = location === 'throne' ? [] : createTeleportPortals(rooms, [...terrain, ...oneWays], startRoomId, exitRooms[0]?.id, roomDistance, roomW, roomH);
+    const teleportPortals = location === 'throne' || location === 'castle' ? [] : createTeleportPortals(rooms, [...terrain, ...oneWays], startRoomId, exitRooms[0]?.id, roomDistance, roomW, roomH);
     const stageTwoRewardPlatforms = location === 'swamps'
       ? swampPlatforms.filter(({ route }) => route === 'main').sort((a, b) => a.y - b.y || b.w - a.w)
       : location === 'mines'
@@ -828,7 +869,9 @@ export default function App() {
       shardValue: secret.reward.kind === 'shardCache' ? 42 : 30 + sector * 4,
     }))];
     const keys = new Set<string>(), pressed = new Set<string>();
-    const projectiles: Projectile[] = [], hazards: Hazard[] = [], shardDrops: ShardDrop[] = [], playerGhosts: PlayerGhost[] = [], traps: Trap[] = [], particles: Particle[] = [], gateFragments: GateFragment[] = [], explosions: Explosion[] = [], rockWarnings: RockWarning[] = [], bossWarnings: BossWarning[] = [];
+    const projectiles: Projectile[] = [], hazards: Hazard[] = [], shardDrops: ShardDrop[] = [], playerGhosts: ShadowDashGhost[] = [], traps: Trap[] = [], particles: Particle[] = [], gateFragments: GateFragment[] = [], explosions: Explosion[] = [], rockWarnings: RockWarning[] = [], bossWarnings: BossWarning[] = [];
+    const sinkingPlatforms = swampLevel ? createSinkingPlatforms(swampPlatforms, terrain, oneWays) : [];
+    const gasBubbles = swampLevel ? createGasBubbles(SWAMP_WORLD.width, SWAMP_WORLD.poisonY) : [];
     const roomAt = (x: number, y: number) => rooms.find((room) => x >= room.x && x < room.x + roomW && y >= room.y && y < room.y + roomH)?.id;
     const combatRooms = new Set(enemies.map((enemy) => roomAt(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2)).filter((id): id is number => id !== undefined));
     const damagedRooms = new Set<number>(), clearedRooms = new Set<number>(), spikeFallsByRoom = new Map<number, number>();
@@ -840,7 +883,7 @@ export default function App() {
       && enemy.x <= camera + viewW + margin
       && enemy.y + enemy.h >= cameraY - margin
       && enemy.y <= cameraY + viewH + margin;
-    let grenadeCd = 0, trapCd = 0, kills = 0, shards = runProgress.current.shards, last = performance.now(), gameTime = 0, hitstopUntil = 0, raf = 0, uiTimer = 0, shake = 0, flash = 0, spikeFade = 0, spikeCooldown = 0, hazardRecovery = 0, hazardTeleported = false, safeGroundTime = 0, activeDoor: Door | null = null, stageTwoArenaLocked = false, stageFourArenaLocked = cryptLayout || bridgeLayout, finaleSequence = 0, finaleTimer = 0, finaleBeat = 0, throneGateOpen = false, throneGateNotice = false, servantX = startRoom.x + 70;
+    let grenadeCd = 0, trapCd = 0, kills = 0, shards = runProgress.current.shards, last = performance.now(), gameTime = 0, hitstopUntil = 0, raf = 0, uiTimer = 0, shake = 0, flash = 0, spikeFade = 0, spikeCooldown = 0, poisonTick = 0, hazardRecovery = 0, hazardTeleported = false, safeGroundTime = 0, activeDoor: Door | null = null, stageTwoArenaLocked = throneScene, stageFourArenaLocked = cryptLayout || bridgeLayout, finaleSequence = 0, finaleTimer = 0, finaleBeat = 0, throneGateOpen = false, throneGateNotice = false, servantX = startRoom.x + 70;
     const torches = Array.from({ length: 42 }, (_, i) => ({ x: 110 + i * 247 + Math.random() * 90, y: 145 + Math.random() * (worldH - 260), phase: Math.random() * Math.PI * 2 }));
     const chains = [...terrain, ...oneWays].filter(() => Math.random() > .72).map((tile) => ({ x: tile.x + 22 + Math.random() * Math.max(10, tile.w - 44), y: tile.y + tile.h, length: 45 + Math.random() * 105 }));
     for (const room of rooms) if (room.connections.has(room.id + ROOM_COLS)) chains.push({ x: room.x + roomW / 2, y: room.y + roomH - wall - 300, length: 345 });
@@ -873,7 +916,7 @@ export default function App() {
         enemy.vx = enemyCenter < wallCenter ? -Math.abs(enemy.patrolSpeed) : Math.abs(enemy.patrolSpeed);
       }
     };
-    const isFlyingEnemy = (enemy: Enemy) => enemy.kind === 'flyer' || enemy.kind === 'wraith' || enemy.variant === 'gargoyleBomber';
+    const isFlyingEnemy = (enemy: Enemy) => enemy.kind === 'flyer' || enemy.kind === 'wraith';
     const applyEnemyGravity = (enemy: Enemy, dt: number) => {
       if (isFlyingEnemy(enemy)) return;
       // Knockback also affects stationary enemies. Keep every ground enemy over
@@ -908,6 +951,25 @@ export default function App() {
     const tap = (...codes: string[]) => codes.some((code) => pressed.has(code));
     const burst = (x: number, y: number, color: string, count = 9) => {
       for (let i = 0; i < count; i++) particles.push({ x, y, vx: (Math.random() - .5) * 260, vy: (Math.random() - .7) * 220, life: .25 + Math.random() * .35, color, size: 2 + Math.random() * 5 });
+    };
+    const dustCloud = (x: number, y: number, force: number, split = false) => {
+      const count = Math.round(7 + force * 8);
+      for (let i = 0; i < count; i++) {
+        const side = split ? (i % 2 ? 1 : -1) : (Math.random() - .5) * .7;
+        particles.push({ x: x + (Math.random() - .5) * 18, y: y - Math.random() * 4, vx: side * (45 + Math.random() * 150) * force, vy: -25 - Math.random() * 105 * force, life: .28 + Math.random() * .28, color: 'rgba(248,250,252,.68)', size: 3 + Math.random() * 6 });
+      }
+    };
+    const shadowDashBurst = (direction: number) => {
+      const originX = player.x + player.w / 2 - direction * 13;
+      const originY = player.y + player.h - 5;
+      for (let i = 0; i < 14; i++) {
+        const life = .22 + Math.random() * .18;
+        particles.push({ x: originX, y: originY - Math.random() * 10, vx: -direction * (90 + Math.random() * 230), vy: -35 - Math.random() * 125, life, maxLife: life, color: i % 3 ? '#e5e7eb' : '#ffffff', size: 5 + Math.random() * 9, shape: 'smoke' });
+      }
+      for (let i = 0; i < 10; i++) {
+        const life = .18 + Math.random() * .16;
+        particles.push({ x: originX, y: originY - Math.random() * 24, vx: -direction * (190 + Math.random() * 310), vy: (Math.random() - .7) * 190, life, maxLife: life, color: i % 2 ? '#f8fafc' : '#aeb4bf', size: 3 + Math.random() * 7, shape: 'shard', rotation: Math.random() * Math.PI, spin: (Math.random() - .5) * 18 });
+      }
     };
     const breakPrisonGate = (gate: PrisonGate, direction: number) => {
       gate.opened = true;
@@ -951,7 +1013,8 @@ export default function App() {
       const sourceInFront = enemy.facing > 0 ? sourceX > enemy.x + enemy.w / 2 : sourceX < enemy.x + enemy.w / 2;
       if (enemy.kind === 'shield' && enemy.stunned <= 0 && sourceInFront && !bypassGuard) { enemy.blocked = .22; shake = 2; burst(enemy.x + enemy.w / 2 + enemy.facing * 18, enemy.y + 22, '#fde68a', 5); return; }
       if (enemy.variant === 'royalGuard' && sourceInFront && !bypassGuard) { damage *= .5; enemy.guardTriggered = true; }
-      enemy.hp -= damage * runProgress.current.damage; enemy.hurt = .16; enemy.x += direction * 18; enemy.stunned = Math.max(enemy.stunned, .08); shake = Math.max(shake, damage >= 35 ? 8 : 5); burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fff7c2', 5); burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fbbf24', 11);
+      enemy.hp -= damage * runProgress.current.damage; enemy.hurt = .16; enemy.x += direction * 18; enemy.stunned = Math.max(enemy.stunned, .08); shake = Math.max(shake, damage >= 35 ? 8 : 5);
+      burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fff7c2', 5); burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fbbf24', 11);
       if (grantsSoul) { player.soul = Math.min(100, player.soul + 11); setSoulHud(player.soul); if (player.soul >= 100) unlockAchievement('full_tank'); }
       if (enemy.hp <= 0) {
         if (enemy.kind === 'rightHand' && !enemy.defeated) {
@@ -1038,8 +1101,8 @@ export default function App() {
       else if (gear.kind === 'trap') placeTrap(gear, slot);
       else if (gear.kind === 'grenade' || gear.kind === 'freeze') grenade(gear, slot);
     };
-    const damagePlayer = (_damage: number, sourceX: number, meleeAttacker?: Enemy, forcedMaskDamage?: number, ignoreGuard = false) => {
-      if (godModeRef.current || player.roll > 0 || player.hurt > 0 || player.dead) return;
+    const damagePlayer = (_damage: number, sourceX: number, meleeAttacker?: Enemy, forcedMaskDamage?: number, ignoreGuard = false, bypassInvulnerability = false) => {
+      if (godModeRef.current || (!bypassInvulnerability && (player.roll > 0 || player.hurt > 0)) || player.dead) return;
       if (player.focus > 0) { player.focus = 0; player.focusBroken = true; burst(player.x + player.w / 2, player.y + 20, '#d7f7ef', 8); }
       const attackInFront = player.facing > 0 ? sourceX > player.x : sourceX < player.x + player.w;
       if (!ignoreGuard && player.guard > 0 && attackInFront) {
@@ -1136,6 +1199,7 @@ export default function App() {
     const moveAndCollide = (dt: number) => {
       const wasGrounded = player.grounded;
       const oldY = player.y;
+      const impactSpeed = player.vy;
       player.x += player.vx * dt;
       for (const tile of solids) if (overlap(player, tile)) {
         const prisonGate = prisonGates.find((gate) => gate === tile && !gate.opened);
@@ -1145,15 +1209,16 @@ export default function App() {
       }
       player.y += player.vy * dt; player.grounded = false;
       for (const tile of solids) if (overlap(player, tile)) {
-        if (player.vy > 0) { player.y = tile.y - player.h; player.vy = 0; player.grounded = true; player.jumps = 0; if (!wasGrounded && !player.dead) { player.landSquash = .16; shake = Math.max(shake, 3); burst(player.x + player.w / 2, player.y + player.h, '#94a3b8', 10); } }
+        if (player.vy > 0) { player.y = tile.y - player.h; player.vy = 0; player.grounded = true; player.jumps = 0; if (!wasGrounded && !player.dead) { const hard = impactSpeed > 520; player.landSquash = player.landSquashMax = hard ? .2 : .16; shake = Math.max(shake, hard ? 6 : 2); dustCloud(player.x + player.w / 2, player.y + player.h, hard ? 1.25 : .7, hard); } }
         else if (player.vy < 0) { player.y = tile.y + tile.h; player.vy = 0; }
       }
       if (player.vy >= 0 && player.drop <= 0) for (const tile of oneWays) {
+        if ('ghost' in tile && tile.ghost && !ghostPlatformVisible(tile as Box & { phase?: number }, gameTime)) continue;
         const clockPlatform = tile as ClockPlatform;
         if (clockPlatform.disappearing && Math.sin(gameTime * 1.45 + (clockPlatform.phase || 0)) < -.18) continue;
         const oldBottom = oldY + player.h, newBottom = player.y + player.h;
         if (player.x + player.w > tile.x && player.x < tile.x + tile.w && oldBottom <= tile.y + 3 && newBottom >= tile.y) {
-          player.y = tile.y - player.h; player.vy = 0; player.grounded = true; player.jumps = 0; if (!wasGrounded && !player.dead) { player.landSquash = .16; shake = Math.max(shake, 3); burst(player.x + player.w / 2, player.y + player.h, '#94a3b8', 10); }
+          player.y = tile.y - player.h; player.vy = 0; player.grounded = true; player.jumps = 0; if (!wasGrounded && !player.dead) { const hard = impactSpeed > 520; player.landSquash = player.landSquashMax = hard ? .2 : .16; shake = Math.max(shake, hard ? 6 : 2); dustCloud(player.x + player.w / 2, player.y + player.h, hard ? 1.25 : .7, hard); }
         }
       }
     };
@@ -1182,19 +1247,20 @@ export default function App() {
         if (uiTimer <= 0) { uiTimer = .08; setHud({ hp: 0, maxHp: player.maxHp, shards, kills, grenade: Math.max(0, grenadeCd), trap: Math.max(0, trapCd), message: 'ВЫ ПРОИГРАЛИ' }); }
         return;
       }
-      if (bridgeLayout && player.y + player.h >= 940 && hazardRecovery <= 0 && !noClipModeRef.current) {
-        recoverFromHazard(player.x + player.w / 2);
+      if (bridgeLayout && player.y + player.h >= 965 && !noClipModeRef.current) {
+        damagePlayer(player.maxHp, player.x + player.w / 2, undefined, player.maxHp, true, true);
         return;
       }
       if (location === 'throne') {
+        const throneBossAlive = enemies.some((enemy) => enemy.kind === 'rightHand' && !enemy.dead);
         const nearArmor = Math.abs(player.x + player.w / 2 - (royalArmor.x + royalArmor.w / 2)) < 72;
         const nearThrone = Math.abs(player.x + player.w / 2 - (throne.x + throne.w / 2)) < 82;
-        if (!finaleSequence && nearArmor && tap('KeyE')) { setStoryMessage('Доспехи пусты... Царя здесь нет. Но почему они выглядят в точности как мои?'); window.setTimeout(() => setStoryMessage(''), 4200); }
+        if (!throneBossAlive && !finaleSequence && nearArmor && tap('KeyE')) { setStoryMessage('Доспехи пусты... Царя здесь нет. Но почему они выглядят в точности как мои?'); window.setTimeout(() => setStoryMessage(''), 4200); }
         const nearGate = player.x + player.w > throneGate.x - 34;
         if (!throneGateOpen && player.x + player.w > throneGate.x) { player.x = throneGate.x - player.w; player.vx = Math.min(0, player.vx); }
         if (!throneGateOpen && nearGate && !throneGateNotice) { throneGateNotice = true; setStoryMessage('Выход заблокирован. Трон ждет своего часа...'); window.setTimeout(() => setStoryMessage(''), 2600); }
         if (!nearGate) throneGateNotice = false;
-        if (!finaleSequence && nearThrone && tap('KeyE')) { finaleSequence = 1; finaleTimer = 0; player.x = throne.x + throne.w / 2 - player.w / 2; player.y = throne.y + throne.h - player.h - 12; player.vx = 0; player.vy = 0; playHeartbeat(); }
+        if (!throneBossAlive && !finaleSequence && nearThrone && tap('KeyE')) { finaleSequence = 1; finaleTimer = 0; player.x = throne.x + throne.w / 2 - player.w / 2; player.y = throne.y + throne.h - player.h - 12; player.vx = 0; player.vy = 0; playHeartbeat(); }
         if (finaleSequence === 1) {
           finaleTimer += dt; player.vx = 0; player.vy = 0; keys.clear(); pressed.clear(); servantX = Math.min(throne.x - 65, servantX + dt * 260);
           const throneCameraX = Math.max(0, Math.min(throne.x + throne.w / 2 - viewW / 2, worldW - viewW));
@@ -1244,10 +1310,10 @@ export default function App() {
         player.vx += (target - player.vx) * Math.min(1, dt * (player.grounded ? 15 : 7));
         if (left) player.facing = -1; if (right) player.facing = 1;
       }
-      if (!noClipModeRef.current && !focusing && !controlsLocked && tap('ShiftLeft', 'ShiftRight', 'KeyC') && player.rollCd <= 0) { player.roll = .3; player.rollCd = .65; player.vx = player.facing * 440; burst(player.x + 17, player.y + 45, '#66e4c2', 7); }
+      if (!noClipModeRef.current && !focusing && !controlsLocked && tap('ShiftLeft', 'ShiftRight', 'KeyC') && player.rollCd <= 0) { player.roll = .3; player.rollCd = .65; player.vx = player.facing * 440; player.trailTimer = 0; shadowDashBurst(player.facing); }
       if (!noClipModeRef.current && !focusing && !controlsLocked && tap('Space', 'ArrowUp')) {
         if ((keys.has('ArrowDown') || keys.has('KeyS')) && player.grounded) { player.drop = .22; player.grounded = false; player.y += 5; }
-        else if (player.grounded || player.jumps < 2) { player.vy = -PLAYER_JUMP_SPEED; player.jumps++; player.grounded = false; burst(player.x + 17, player.y + 55, '#a7b2b8', 6); }
+        else if (player.grounded || player.jumps < 2) { player.vy = -PLAYER_JUMP_SPEED; player.jumps++; player.grounded = false; dustCloud(player.x + 17, player.y + 55, .65); }
       }
       const nearbyPrisonGate = prisonGates.find((gate) => !gate.opened
         && Math.abs(player.x + player.w / 2 - (gate.x + gate.w / 2)) < 76
@@ -1259,23 +1325,86 @@ export default function App() {
         pressed.delete('KeyE'); shake = Math.max(shake, 4);
         burst(nearbyPrisonGate.x + nearbyPrisonGate.w / 2, nearbyPrisonGate.y + nearbyPrisonGate.h / 2, '#789b78', 12);
       }
+      const nearbyCart = minesLevel?.carts.find((cart) => !cart.moving
+        && Math.abs(player.x + player.w / 2 - (cart.x + cart.w / 2)) < 92
+        && Math.abs(player.y + player.h - (cart.y + cart.h)) < 70);
+      if (nearbyCart && tap('KeyE')) {
+        nearbyCart.moving = true; nearbyCart.vx = player.facing * 620; pressed.delete('KeyE');
+        shake = Math.max(shake, 5); burst(nearbyCart.x + nearbyCart.w / 2, nearbyCart.y + nearbyCart.h, '#94a3b8', 10);
+      }
       if (!noClipModeRef.current) {
         const jumpHeld = keys.has('Space') || keys.has('ArrowUp');
+        if (bridgeLevel) {
+          const windForce = bridgeWindAmount(gameTime, bridgeLevel.wind);
+          player.vx += windForce * dt;
+        }
+        if (clockLevel) for (const vent of clockLevel.vents) {
+          const inVent = player.x + player.w > vent.x && player.x < vent.x + vent.w
+            && player.y + player.h > vent.y && player.y < vent.y + vent.h;
+          if (inVent) {
+            // The stream catches a falling player and settles into a gentle
+            // upward hover. Holding jump turns that hover into a fast launch.
+            const targetVelocity = jumpHeld ? -Math.min(920, vent.strength * .44) : -220;
+            const response = 1 - Math.exp(-(jumpHeld ? 12 : 10) * dt);
+            player.vy += (targetVelocity - player.vy) * response;
+            player.grounded = false;
+          }
+        }
         if (player.roll > 0) player.vy = 0;
         else {
           if (!jumpHeld && player.bounceLock <= 0 && player.vy < -180) player.vy *= Math.max(0, 1 - dt * 24);
           player.vy = Math.min(player.vy + 1550 * dt, 850);
         }
         moveAndCollide(dt);
+        if (clockLevel) for (const gear of clockLevel.gears) {
+          const centerX = player.x + player.w / 2, centerY = player.y + player.h / 2;
+          const dx = centerX - gear.x, dy = centerY - gear.y, distance = Math.hypot(dx, dy);
+          // Use the player's body edge, not only its centre, for tooth contact.
+          // This makes jumping onto the visible teeth reliable from a ledge.
+          const contactRadius = gear.radius + 40;
+          if (distance > gear.radius * .42 && distance < contactRadius && distance > 0) {
+            const nx = dx / distance, ny = dy / distance, correction = contactRadius - distance;
+            player.x += nx * correction; player.y += ny * correction;
+            const tangentX = -ny * gear.speed * gear.radius, tangentY = nx * gear.speed * gear.radius;
+            player.vx += (tangentX - player.vx) * Math.min(1, dt * 8);
+            player.vy += (tangentY - player.vy) * Math.min(1, dt * 5);
+            if (ny < -.45) { player.grounded = true; player.jumps = 0; }
+          }
+        }
+        if (minesLevel) {
+          for (const cart of minesLevel.carts) if (cart.moving) {
+            cart.x += cart.vx * dt; cart.vx *= Math.max(0, 1 - dt * .7);
+            if (cart.x <= cart.minX || cart.x + cart.w >= cart.maxX || Math.abs(cart.vx) < 45) { cart.x = Math.max(cart.minX, Math.min(cart.x, cart.maxX - cart.w)); cart.vx = 0; cart.moving = false; }
+            for (const enemy of enemies) if (!enemy.dead && overlap(cart, enemy)) damageEnemy(enemy, 55, Math.sign(cart.vx) || 1, cart.x + cart.w / 2, false, true);
+          }
+        }
+        if (cryptLevel) for (const slab of cryptLevel.crumblingSlabs) {
+          if (slab.state === 'stable' && player.grounded && player.x + player.w > slab.x && player.x < slab.x + slab.w && Math.abs(player.y + player.h - slab.y) < 4) { slab.state = 'cracking'; slab.timer = 1; }
+          if (slab.state === 'cracking') { slab.timer -= dt; if (slab.timer <= 0) { slab.state = 'fallen'; const index = solids.indexOf(slab); if (index >= 0) solids.splice(index, 1); const blocker = projectileBlockers.indexOf(slab); if (blocker >= 0) projectileBlockers.splice(blocker, 1); shake = 9; burst(slab.x + slab.w / 2, slab.y, '#776b82', 24); } }
+        }
         for (const spike of spikes) if (spikeCooldown <= 0 && overlap(player, spike)) {
           const spikeRoom = roomAt(player.x + player.w / 2, player.y + player.h / 2);
           if (spikeRoom !== undefined) { const falls = (spikeFallsByRoom.get(spikeRoom) || 0) + 1; spikeFallsByRoom.set(spikeRoom, falls); if (falls >= 3) unlockAchievement('stuntman'); }
           recoverFromHazard(spike.x + spike.w / 2);
           break;
         }
-        if (swampLevel && spikeCooldown <= 0 && overlap(player, swampLevel.poison)) {
-          recoverFromHazard(player.x + player.w / 2);
-          burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14);
+        if (swampLevel && overlap(player, swampLevel.poison)) {
+          poisonTick -= dt;
+          if (poisonTick <= 0) { damagePlayer(1, player.x + player.w / 2, undefined, 1, true); poisonTick = .6; burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14); }
+        } else poisonTick = 0;
+        for (const platform of sinkingPlatforms) {
+          const standing = player.grounded && player.x + player.w > platform.collider.x && player.x < platform.collider.x + platform.collider.w
+            && Math.abs(player.y + player.h - platform.collider.y) < 6;
+          const oldY = platform.collider.y;
+          updateSinkingPlatform(platform, standing, dt);
+          if (standing) player.y += platform.collider.y - oldY;
+        }
+        for (const bubble of gasBubbles) {
+          updateGasBubble(bubble, dt);
+          if (bubble.state === 'rising' && overlap(player, bubble)) {
+            bubble.state = 'burst'; bubble.timer = .3; bubble.x -= 24; bubble.y -= 24; bubble.w = 78; bubble.h = 78;
+            damagePlayer(1, bubble.x + bubble.w / 2, undefined, 1, true); shake = Math.max(shake, 8); burst(bubble.x + bubble.w / 2, bubble.y + bubble.h / 2, '#bef264', 24);
+          }
         }
       }
       const standingSafely = hazardRecovery <= 0 && player.grounded && player.y >= 0 && player.y < worldH - player.h && !spikes.some((spike) => overlap({ x: player.x - 12, y: player.y, w: player.w + 24, h: player.h + 8 }, spike)) && !(swampLevel && overlap(player, swampLevel.poison));
@@ -1299,8 +1428,19 @@ export default function App() {
         cameraY = clampCamera(player.y + player.h / 2 - viewH / 2, worldH, viewH);
         pressed.delete('KeyE'); burst(destination.x, destination.y - 34, '#a5f3fc', 28); shake = 7;
       }
-      const fastMovement = player.roll > 0 || Math.abs(player.vx) > 350 || (!player.grounded && Math.hypot(player.vx, player.vy) > 470);
-      if (fastMovement && player.trailTimer <= 0) { playerGhosts.push({ x: player.x, y: player.y, facing: player.facing, life: .22 }); player.trailTimer = .045; }
+      const nearbyMirror = castleMirrors.find((mirror) => Math.abs(player.x + player.w / 2 - (mirror.x + mirror.w / 2)) < 74 && Math.abs(player.y + player.h - (mirror.y + mirror.h)) < 80);
+      if (nearbyMirror && tap('KeyE')) {
+        const destination = castleMirrors.find((mirror) => mirror !== nearbyMirror && mirror.pairId === nearbyMirror.pairId);
+        if (destination) {
+          burst(player.x + player.w / 2, player.y + player.h / 2, '#a78bfa', 24);
+          player.x = destination.x + destination.w / 2 - player.w / 2; player.y = destination.y + destination.h - player.h;
+          player.vx = 0; player.vy = 0; player.controlLock = .15; checkpoint.x = player.x; checkpoint.y = player.y;
+          camera = clampCamera(player.x + player.w / 2 - viewW / 2, worldW, viewW); cameraY = clampCamera(player.y + player.h / 2 - viewH / 2, worldH, viewH);
+          pressed.delete('KeyE'); burst(destination.x + destination.w / 2, destination.y + destination.h / 2, '#67e8f9', 28); shake = 8;
+        }
+      }
+      const shadowDashActive = player.roll > .1;
+      if (shadowDashActive && player.trailTimer <= 0) { playerGhosts.push({ x: player.x, y: player.y, facing: player.facing, life: .24, maxLife: .24 }); player.trailTimer = .055; }
       if (player.grounded && Math.abs(player.vx) > 95 && player.dustTimer <= 0) { burst(player.x + player.w / 2 - player.facing * 10, player.y + player.h - 2, '#7c8793', 3); player.dustTimer = .11; }
 
       if (stageTwoBossRoom && !stageTwoArenaLocked && roomAt(player.x + player.w / 2, player.y + player.h / 2) === stageTwoBossRoom.id && enemies.some((enemy) => enemy.kind === 'boss' && !enemy.dead && !enemy.dormant)) {
@@ -1451,7 +1591,9 @@ export default function App() {
         } else if (enemy.kind === 'boss' || enemy.kind === 'rightHand') {
           const reach = enemy.kind === 'rightHand' ? 105 : 88;
           if (detected && Math.abs(dx) < reach && enemy.cooldown <= 0 && enemy.attack <= 0) { enemy.attack = .42; enemy.cooldown = enemy.kind === 'rightHand' ? .72 : 1; enemy.vx = 0; enemy.facing = Math.sign(dx) || enemy.facing; }
-          if (wasAttacking && enemy.attack <= 0 && detected && Math.abs(dx) < reach + 18) damagePlayer(enemy.kind === 'rightHand' ? 30 : 23, enemyCenter, enemy);
+          if (wasAttacking && enemy.attack <= 0) {
+            if (detected && Math.abs(dx) < reach + 18) damagePlayer(enemy.kind === 'rightHand' ? 30 : 23, enemyCenter, enemy);
+          }
         } else if (enemy.kind === 'crossbow') {
           enemy.vx = 0; if (seesPlayer) enemy.facing = Math.sign(dx) || enemy.facing;
           if (seesPlayer && enemy.cooldown <= 0 && enemy.attack <= 0) { enemy.attack = enemy.variant === 'cappedArcher' ? .8 : .35; enemy.cooldown = enemy.variant === 'towerSniper' ? 1.9 : 2.6; }
@@ -1464,8 +1606,8 @@ export default function App() {
           if (detected && enemy.cooldown <= 0) {
             enemy.attack = .35; enemy.cooldown = 3.2;
             const directDistance = Math.max(1, Math.hypot(dx, dyToPlayer));
-            const verticalDrop = enemy.variant === 'gargoyleBomber', bombVx = verticalDrop ? 0 : dx / directDistance * 500, bombVy = verticalDrop ? 80 : dyToPlayer / directDistance * 500;
-            projectiles.push({ x: verticalDrop ? playerCenter - 7 : enemyCenter + enemy.facing * 14, y: enemy.y + 5, w: 13, h: 13, vx: bombVx, vy: bombVy, life: enemy.variant === 'dynamiteTosser' ? 1.5 : 2.4, damage: 20, kind: 'enemyBomb', owner: enemy });
+            const bombVx = dx / directDistance * 500, bombVy = dyToPlayer / directDistance * 500;
+            projectiles.push({ x: enemyCenter + enemy.facing * 14, y: enemy.y + 5, w: 13, h: 13, vx: bombVx, vy: bombVy, life: enemy.variant === 'dynamiteTosser' ? 1.5 : 2.4, damage: 20, kind: 'enemyBomb', owner: enemy });
           }
         } else if (enemy.kind === 'mage') {
           enemy.vx = 0; if (seesPlayer) enemy.facing = Math.sign(dx) || enemy.facing;
@@ -1487,6 +1629,14 @@ export default function App() {
           if (enemy.x < enemy.left || enemy.x + enemy.w > enemy.right) { enemy.vx *= -1; enemy.x = Math.max(enemy.left, Math.min(enemy.x, enemy.right - enemy.w)); }
         }
       }
+      for (const statue of crossbowStatues) {
+        statue.cooldown -= dt;
+        if (statue.cooldown <= 0) {
+          statue.cooldown += 2;
+          projectiles.push({ x: statue.x + statue.w / 2 + statue.facing * 22, y: statue.y + 29, w: 24, h: 5, vx: statue.facing * 690, vy: 0, life: 2.3, damage: 16, kind: 'trapArrow' });
+          burst(statue.x + statue.w / 2 + statue.facing * 27, statue.y + 31, '#fde68a', 5);
+        }
+      }
       for (const p of projectiles) {
         if (p.kind === 'magicOrb' && p.owner?.dead) { p.life = 0; continue; }
         const previousX = p.x, previousY = p.y;
@@ -1501,7 +1651,7 @@ export default function App() {
         else if (hitWorld && p.kind === 'gear' && (p.bounces || 0) > 0) { p.x = previousX; p.y = previousY; p.bounces = (p.bounces || 0) - 1; p.vx *= -1; p.vy *= -1; }
         else if (hitWorld) p.life = 0;
         if (!hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, e)) { damageEnemy(e, p.damage, Math.sign(p.vx), p.x); p.life = 0; }
-        if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; }
+        if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'trapArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; }
         if (p.kind === 'magicOrb' && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; burst(p.x, p.y, '#c084fc', 12); }
         if ((p.kind === 'wardenSkull' || p.kind === 'fallingRock') && overlap(p, player)) { damagePlayer(p.damage, p.x, p.owner); p.life = 0; burst(p.x, p.y, p.kind === 'wardenSkull' ? '#c084fc' : '#9ca3af', 14); }
         if (p.kind === 'enemyBomb' && p.reflected) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemy)) { const wasAlive = !enemy.dead; damageEnemy(enemy, 48, Math.sign(p.vx) || 1, p.x); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); p.life = 0; break; }
@@ -1535,7 +1685,7 @@ export default function App() {
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant && enemyNearViewport(enemy)) applyEnemyGravity(enemy, dt);
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant && enemy.kind !== 'wraith' && enemyNearViewport(enemy)) resolveEnemyWalls(enemy);
       for (const roomId of combatRooms) if (!clearedRooms.has(roomId) && !enemies.some((enemy) => !enemy.dead && roomAt(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2) === roomId)) { clearedRooms.add(roomId); if (!damagedRooms.has(roomId)) unlockAchievement('clear_mind'); }
-      for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 520 * dt; }
+      for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.shape === 'smoke' ? 80 : 520) * dt; if (p.rotation !== undefined) p.rotation += (p.spin ?? 0) * dt; }
       updateGateFragments(gateFragments, dt);
       for (const ghost of playerGhosts) ghost.life -= dt;
       for (const explosion of explosions) explosion.life -= dt;
@@ -1560,7 +1710,7 @@ export default function App() {
       }
       if (clockLevel && player.hurt <= 0) for (const gear of clockLevel.gears) {
         const dx = player.x + player.w / 2 - gear.x, dy = player.y + player.h / 2 - gear.y;
-        if (gear.dangerous && dx * dx + dy * dy < (gear.radius + 16) ** 2) { damagePlayer(1, gear.x); break; }
+        if (gear.dangerous && dx * dx + dy * dy < (gear.radius * .42) ** 2) { damagePlayer(1, gear.x); break; }
       }
       shake *= .82;
       // Вход только по E: ArrowUp также отвечает за прыжок и раньше случайно
@@ -1599,8 +1749,7 @@ export default function App() {
     const drawCanvas = () => {
       const sx = settingsRef.current.screenShake ? (Math.random() - .5) * shake : 0, sy = settingsRef.current.screenShake ? (Math.random() - .5) * shake : 0;
       ctx.save(); ctx.translate(sx, sy);
-      const bg = ctx.createRadialGradient(W * .5, H * .38, 40, W * .5, H * .45, W * .72);
-      bg.addColorStop(0, theme.center); bg.addColorStop(.5, theme.middle); bg.addColorStop(1, theme.edge); ctx.fillStyle = bg; ctx.fillRect(-20, -20, W + 40, H + 40);
+      drawParallaxBackground(ctx, location, W, H);
       const now = gameTime;
       if (swampLayout) {
         const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#182843'); sky.addColorStop(.52, '#39483f'); sky.addColorStop(1, '#17251c');
@@ -1635,15 +1784,34 @@ export default function App() {
         }
         ctx.fillStyle = 'rgba(39,31,48,.32)';
         for (let i = 0; i < 8; i++) { const x = i * 210 - (camera * .22 % 210); ctx.beginPath(); ctx.moveTo(x, H); ctx.lineTo(x + 100, H - 100 - (i % 3) * 35); ctx.lineTo(x + 230, H); ctx.fill(); }
+        if (bridgeLevel) {
+          const windForce = bridgeWindAmount(now, bridgeLevel.wind);
+          if (Math.abs(windForce) > 30) for (let i = 0; i < 22; i += 1) {
+            const direction = Math.sign(windForce), travel = (now * (360 + i * 7)) % (W + 260);
+            const x = direction > 0 ? travel - 180 : W - travel + 180, y = 85 + (i * 73) % Math.max(120, H - 150);
+            ctx.strokeStyle = `rgba(255,255,255,${.18 + (i % 4) * .08})`; ctx.lineWidth = 2 + i % 2;
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - direction * (75 + i % 5 * 18), y + (i % 3 - 1) * 3); ctx.stroke();
+          }
+        }
       }
+      drawParallaxLayers(ctx, location, W, H, camera, cameraY);
       ctx.fillStyle = 'rgba(68,74,119,.14)';
       if (!bridgeLayout) for (let y = 95; y < H; y += 42) for (let x = -60; x < W + 80; x += 92) { const offset = Math.floor(y / 42) % 2 ? 42 : 0; ctx.fillRect(x + offset, y, 76, 3); }
       ctx.fillStyle = 'rgba(255,255,255,.018)'; for (let y = 0; y < H; y += 8) ctx.fillRect(0, y, W, 1);
       ctx.fillStyle = 'rgba(6,8,20,.38)'; if (!bridgeLayout) for (let i = 0; i < 12; i++) { const x = ((i * 233 - camera * .18) % 1500) - 100; ctx.fillRect(x, 120 + (i % 3) * 45, 110, 500); }
       if (!bridgeLayout && !castleLayout) for (const torch of torches) {
         const x = ((torch.x - camera * .22) % (W + 220)) - 30, y = ((torch.y - cameraY * .35) % (H + 140)) - 40, flicker = 1 + Math.sin(now * 9 + torch.phase) * .18 + Math.sin(now * 17 + torch.phase) * .08;
-        const glow = ctx.createRadialGradient(x, y, 2, x, y, 48 * flicker); glow.addColorStop(0, theme.mist.replace(/\.0\d+\)/, '.3)')); glow.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = glow; ctx.fillRect(x - 55, y - 55, 110, 110);
-        ctx.fillStyle = '#5b4336'; ctx.fillRect(x - 3, y + 7, 6, 15); ctx.fillStyle = theme.flame; ctx.fillRect(x - 5 * flicker, y - 8 * flicker, 10 * flicker, 16 * flicker); ctx.fillStyle = theme.flameCore; ctx.fillRect(x - 2 * flicker, y - 5 * flicker, 5 * flicker, 9 * flicker);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const glow = ctx.createRadialGradient(x, y, 2, x, y, 64 * flicker);
+        glow.addColorStop(0, 'rgba(255,214,128,.24)'); glow.addColorStop(.3, 'rgba(255,154,55,.115)'); glow.addColorStop(1, 'rgba(255,112,24,0)');
+        ctx.fillStyle = glow; ctx.fillRect(x - 74, y - 74, 148, 148);
+        ctx.restore();
+        ctx.fillStyle = '#5b4336'; ctx.fillRect(x - 3, y + 7, 6, 15);
+        ctx.save(); ctx.shadowColor = theme.flame; ctx.shadowBlur = 10 * flicker;
+        ctx.fillStyle = theme.flame; ctx.fillRect(x - 5 * flicker, y - 8 * flicker, 10 * flicker, 16 * flicker);
+        ctx.shadowColor = theme.flameCore; ctx.shadowBlur = 5 * flicker;
+        ctx.fillStyle = theme.flameCore; ctx.fillRect(x - 2 * flicker, y - 5 * flicker, 5 * flicker, 9 * flicker); ctx.restore();
       }
       ctx.fillStyle = theme.mist; if (!bridgeLayout && !castleLayout) for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(((i * 390 - camera * .08 + now * 8) % 1700) - 180, 470 + i * 42, 250, 38, 0, 0, Math.PI * 2); ctx.fill(); }
       const sceneZoom = ZOOM + (finaleSequence ? .16 : 0); ctx.save(); ctx.scale(sceneZoom, sceneZoom); ctx.translate(-camera, -cameraY);
@@ -1663,6 +1831,11 @@ export default function App() {
         }
       }
       if (castleLevel) drawCastleBackdrop(ctx, castleLevel, now);
+      for (const mirror of castleMirrors) {
+        const nearby = Math.abs(player.x + player.w / 2 - (mirror.x + mirror.w / 2)) < 74 && Math.abs(player.y + player.h - (mirror.y + mirror.h)) < 80;
+        drawCastleMirror(ctx, mirror, now, nearby);
+      }
+      for (const statue of crossbowStatues) drawCrossbowStatue(ctx, statue);
       if (cryptLevel) for (const column of cryptLevel.columns) {
         ctx.globalAlpha = .35 + column.depth * .35;
         const gradient = ctx.createLinearGradient(column.x, 0, column.x + column.w, 0);
@@ -1676,13 +1849,8 @@ export default function App() {
       ctx.globalAlpha = .45; ctx.fillStyle = theme.stone;
       for (const bridge of oneWays) { ctx.fillRect(bridge.x + 10, bridge.y + bridge.h, 8, 24); ctx.fillRect(bridge.x + bridge.w - 18, bridge.y + bridge.h, 8, 24); }
       ctx.globalAlpha = 1;
-      for (const tile of solids) {
-        ctx.fillStyle = bridgeLayout ? '#aeb4bc' : castleLayout ? '#755944' : theme.stone; ctx.fillRect(tile.x, tile.y, tile.w, tile.h); ctx.fillStyle = bridgeLayout ? '#737b84' : castleLayout ? '#34212a' : theme.mortar;
-        for (let y = tile.y + 14; y < tile.y + tile.h; y += 22) { ctx.fillRect(tile.x, y, tile.w, 2); for (let x = tile.x + ((Math.floor((y - tile.y) / 22) % 2) ? 18 : 42); x < tile.x + tile.w; x += 64) ctx.fillRect(x, y - 14, 2, 16); }
-        ctx.fillStyle = 'rgba(255,255,255,.055)'; ctx.fillRect(tile.x + 3, tile.y + 5, Math.max(0, tile.w - 6), 2);
-        ctx.fillStyle = 'rgba(0,0,0,.18)'; for (let x = tile.x + 28; x < tile.x + tile.w; x += 83) ctx.fillRect(x, tile.y + 25 + ((x / 83) % 3) * 13, 7, 3);
-        ctx.shadowColor = bridgeLayout ? '#f6c99a' : theme.accentGlow; ctx.shadowBlur = 9; ctx.fillStyle = bridgeLayout ? '#e5e7eb' : theme.accent; ctx.fillRect(tile.x, tile.y, tile.w, 3); ctx.shadowBlur = 0;
-      }
+      const stoneStyle: EnvironmentTileStyle = { material: 'stone', base: bridgeLayout ? '#858b91' : castleLayout ? '#66503f' : theme.stone, dark: bridgeLayout ? '#454b52' : theme.mortar, edge: bridgeLayout ? '#c4c9cd' : theme.accent, moss: swampLayout ? '#718c35' : prisonLayout ? '#48635a' : cryptLayout ? '#293c72' : '#39483e', wet: prisonLayout || swampLayout || cryptLayout };
+      for (const tile of solids) drawEnvironmentTile(ctx, tile, stoneStyle);
       for (const tile of oneWays) {
         const clockPlatform = tile as ClockPlatform;
         if (clockPlatform.disappearing) {
@@ -1694,10 +1862,10 @@ export default function App() {
           ctx.strokeStyle = '#66534d'; ctx.lineWidth = 4; ctx.beginPath();
           ctx.moveTo(tile.x, tile.y - 32); ctx.quadraticCurveTo(tile.x + tile.w / 2, tile.y + 24, tile.x + tile.w, tile.y - 32); ctx.stroke();
           for (let x = tile.x; x < tile.x + tile.w; x += 28) { ctx.fillStyle = '#aeb2b6'; ctx.fillRect(x, tile.y, 23, tile.h); ctx.fillStyle = '#777c82'; ctx.fillRect(x + 2, tile.y + 5, 19, 3); }
-        } else { ctx.fillStyle = bridgeLayout ? '#aeb4bc' : castleLayout ? '#6b3f27' : prisonLayout ? '#493b2e' : theme.stone; ctx.fillRect(tile.x, tile.y, tile.w, tile.h); }
-        ctx.fillStyle = castleLayout ? '#29170e' : prisonLayout ? '#211b17' : theme.mortar;
-        for (let x = tile.x + 20; x < tile.x + tile.w; x += 42) ctx.fillRect(x, tile.y + 7, 24, 3);
-        ctx.shadowColor = theme.accentGlow; ctx.shadowBlur = 8; ctx.fillStyle = bridgeLayout ? '#e4e7eb' : prisonLayout ? '#75634b' : theme.accent; ctx.fillRect(tile.x, tile.y, tile.w, 3); ctx.shadowBlur = 0;
+        } else {
+          const wooden = prisonLayout || swampLayout || mineLayout || castleLayout;
+          drawEnvironmentTile(ctx, tile, { ...stoneStyle, material: wooden ? 'wood' : 'stone', base: castleLayout ? '#694326' : prisonLayout ? '#493629' : swampLayout ? '#554125' : mineLayout ? '#60432c' : stoneStyle.base, dark: wooden ? '#21150f' : stoneStyle.dark, edge: wooden ? '#8a6940' : stoneStyle.edge });
+        }
         ctx.globalAlpha = 1;
       }
       if (cryptLevel) for (const secret of cryptLevel.secrets) if (!secret.broken) {
@@ -1707,10 +1875,18 @@ export default function App() {
         ctx.beginPath(); ctx.moveTo(cracked.x + 8, cracked.y + 12); ctx.lineTo(cracked.x + 30, cracked.y + 46); ctx.lineTo(cracked.x + 15, cracked.y + 79); ctx.lineTo(cracked.x + 38, cracked.y + 116); ctx.lineTo(cracked.x + 22, cracked.y + 151); ctx.stroke(); ctx.shadowBlur = 0;
       }
       if (clockLevel) {
+        for (const vent of clockLevel.vents) {
+          ctx.fillStyle = '#261710'; ctx.fillRect(vent.x, vent.y + vent.h - 22, vent.w, 22);
+          for (let x = vent.x + 12; x < vent.x + vent.w; x += 24) { ctx.fillStyle = '#9a6a38'; ctx.fillRect(x, vent.y + vent.h - 20, 7, 18); }
+          ctx.strokeStyle = 'rgba(238,224,184,.35)'; ctx.lineWidth = 3;
+          for (let stream = 0; stream < 9; stream += 1) { const x = vent.x + 18 + stream * (vent.w - 36) / 8, rise = (now * 230 + stream * 83 + vent.phase * 50) % vent.h; ctx.beginPath(); ctx.moveTo(x, vent.y + vent.h - rise); ctx.lineTo(x + Math.sin(now * 3 + stream) * 9, vent.y + vent.h - rise - 72); ctx.stroke(); }
+        }
         for (const chain of clockLevel.chains) { ctx.strokeStyle = '#8c632f'; ctx.lineWidth = 4; for (let y = chain.y; y < chain.y + chain.length; y += 15) { ctx.beginPath(); ctx.ellipse(chain.x, y, 6, 9, (Math.floor(y / 15) % 2) * Math.PI / 2, 0, Math.PI * 2); ctx.stroke(); } }
-        for (const gear of clockLevel.gears) { ctx.save(); ctx.translate(gear.x, gear.y); ctx.rotate(now * gear.speed + gear.phase); ctx.fillStyle = '#7b4825'; ctx.strokeStyle = '#e0ad4f'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, gear.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); for (let tooth = 0; tooth < 12; tooth += 1) { ctx.rotate(Math.PI / 6); ctx.fillStyle = tooth % 2 ? '#b87930' : '#d3a348'; ctx.fillRect(gear.radius - 3, -7, 18, 14); } ctx.fillStyle = '#21100c'; ctx.beginPath(); ctx.arc(0, 0, gear.radius * .32, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        for (const gear of clockLevel.gears) { ctx.save(); ctx.translate(gear.x, gear.y); ctx.rotate(now * gear.speed + gear.phase); ctx.fillStyle = '#7b4825'; ctx.strokeStyle = '#e0ad4f'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, gear.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); for (let tooth = 0; tooth < 12; tooth += 1) { ctx.rotate(Math.PI / 6); ctx.fillStyle = tooth % 2 ? '#b87930' : '#d3a348'; ctx.fillRect(gear.radius - 3, -4, 40, 8); } ctx.fillStyle = '#21100c'; ctx.beginPath(); ctx.arc(0, 0, gear.radius * .32, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
       }
       if (minesLevel) drawMines(ctx, minesLevel);
+      if (minesLevel) drawMineMechanics(ctx, minesLevel.carts);
+      if (cryptLevel) drawCryptMechanics(ctx, cryptLevel.crumblingSlabs, cryptLevel.ghostPlatforms, now);
       if (swampLevel) {
         const poison = swampLevel.poison;
         const arenaLeft = SWAMP_WORLD.width - 1100, arenaRoof = 2585, arenaFloor = 3235, entranceTop = 2935;
@@ -1746,6 +1922,15 @@ export default function App() {
             if (platform.kind === 'swing') { ctx.strokeStyle = '#66543a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(platform.x + 12, platform.y); ctx.lineTo(platform.x + 12, platform.y - 175); ctx.moveTo(platform.x + platform.w - 12, platform.y); ctx.lineTo(platform.x + platform.w - 12, platform.y - 175); ctx.stroke(); }
           }
         }
+        for (const bubble of gasBubbles) {
+          if (bubble.state === 'waiting') continue;
+          const pulse = 1 + Math.sin(now * 9 + bubble.phase) * .12;
+          ctx.save(); ctx.translate(bubble.x + bubble.w / 2, bubble.y + bubble.h / 2); ctx.scale(pulse, pulse);
+          ctx.globalAlpha = bubble.state === 'burst' ? Math.max(0, bubble.timer / .3) * .55 : .72;
+          ctx.fillStyle = bubble.state === 'burst' ? '#d9f99d' : '#84cc16';
+          ctx.beginPath(); ctx.arc(0, 0, bubble.w / 2, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = '#ecfccb'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore(); ctx.globalAlpha = 1;
+        }
       }
       for (const gate of prisonGates) if (!gate.opened) {
         ctx.fillStyle = '#11191d'; ctx.fillRect(gate.x, gate.y, gate.w, gate.h);
@@ -1757,6 +1942,7 @@ export default function App() {
       drawGateFragments(ctx, gateFragments);
       for (const chain of chains) { ctx.strokeStyle = '#69707c'; ctx.lineWidth = 2; ctx.beginPath(); for (let y = chain.y; y < chain.y + chain.length; y += 9) { ctx.moveTo(chain.x - 2, y); ctx.lineTo(chain.x + 2, y + 5); ctx.lineTo(chain.x - 2, y + 9); } ctx.stroke(); }
       if (location === 'throne') {
+        const throneBossAlive = enemies.some((enemy) => enemy.kind === 'rightHand' && !enemy.dead);
         const hallLeft = startRoom.x + wall, hallTop = startRoom.y + wall, hallFloor = startRoom.y + roomH - wall;
         ctx.fillStyle = '#070a10'; ctx.fillRect(hallLeft, hallTop, roomW - wall * 2, roomH - wall * 2);
         for (const columnX of [hallLeft + 65, hallLeft + 245, hallLeft + 505, hallLeft + roomW - wall * 2 - 90]) { ctx.fillStyle = '#161a23'; ctx.fillRect(columnX, hallTop + 28, 46, hallFloor - hallTop - 28); ctx.fillStyle = '#292e3a'; ctx.fillRect(columnX - 10, hallTop + 20, 66, 14); ctx.fillRect(columnX - 12, hallFloor - 25, 70, 25); ctx.fillStyle = '#090c12'; ctx.fillRect(columnX + 9, hallTop + 45, 8, hallFloor - hallTop - 78); }
@@ -1770,14 +1956,28 @@ export default function App() {
         ctx.fillStyle = '#10141c'; ctx.beginPath(); ctx.moveTo(throne.x - 17, throne.y + throne.h); ctx.lineTo(throne.x - 17, throne.y - 5); ctx.lineTo(throne.x + 5, throne.y - 35); ctx.lineTo(throne.x + throne.w / 2, throne.y - 70); ctx.lineTo(throne.x + throne.w - 5, throne.y - 35); ctx.lineTo(throne.x + throne.w + 17, throne.y - 5); ctx.lineTo(throne.x + throne.w + 17, throne.y + throne.h); ctx.closePath(); ctx.fill();
         ctx.fillStyle = '#765724'; ctx.fillRect(throne.x - 10, throne.y + 5, 7, throne.h - 5); ctx.fillRect(throne.x + throne.w + 3, throne.y + 5, 7, throne.h - 5); ctx.fillRect(throne.x + 7, throne.y + throne.h - 19, throne.w - 14, 7); ctx.fillStyle = '#681c2c'; ctx.fillRect(throne.x + 14, throne.y - 4, throne.w - 28, 50); ctx.fillRect(throne.x + 8, throne.y + 50, throne.w - 16, 23); ctx.fillStyle = '#3b0e19'; ctx.fillRect(throne.x + 20, throne.y + 3, 4, 36); ctx.fillRect(throne.x + throne.w - 24, throne.y, 3, 39);
         ctx.strokeStyle = '#343a45'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(throne.x - 8, throne.y + 42); ctx.lineTo(throne.x + 10, throne.y + 27); ctx.lineTo(throne.x + 2, throne.y + 14); ctx.moveTo(throne.x + throne.w + 7, throne.y + 52); ctx.lineTo(throne.x + throne.w - 11, throne.y + 35); ctx.lineTo(throne.x + throne.w - 2, throne.y + 19); ctx.stroke();
-        if (!finaleSequence && Math.abs(player.x + player.w / 2 - (royalArmor.x + royalArmor.w / 2)) < 72) { ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillRect(royalArmor.x - 40, royalArmor.y - 28, 130, 19); ctx.fillStyle = '#e7c66d'; ctx.font = 'bold 9px monospace'; ctx.fillText('E · ОСМОТРЕТЬ', royalArmor.x - 25, royalArmor.y - 15); }
-        if (!finaleSequence && Math.abs(player.x + player.w / 2 - (throne.x + throne.w / 2)) < 82) { ctx.fillStyle = 'rgba(0,0,0,.88)'; ctx.fillRect(throne.x - 28, throne.y - 28, 128, 19); ctx.fillStyle = '#f0c65a'; ctx.font = 'bold 9px monospace'; ctx.fillText('E · СЕСТЬ НА ТРОН', throne.x - 19, throne.y - 15); }
+        if (!throneBossAlive && !finaleSequence && Math.abs(player.x + player.w / 2 - (royalArmor.x + royalArmor.w / 2)) < 72) { ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillRect(royalArmor.x - 40, royalArmor.y - 28, 130, 19); ctx.fillStyle = '#e7c66d'; ctx.font = 'bold 9px monospace'; ctx.fillText('E · ОСМОТРЕТЬ', royalArmor.x - 25, royalArmor.y - 15); }
+        if (!throneBossAlive && !finaleSequence && Math.abs(player.x + player.w / 2 - (throne.x + throne.w / 2)) < 82) { ctx.fillStyle = 'rgba(0,0,0,.88)'; ctx.fillRect(throne.x - 28, throne.y - 28, 128, 19); ctx.fillStyle = '#f0c65a'; ctx.font = 'bold 9px monospace'; ctx.fillText('E · СЕСТЬ НА ТРОН', throne.x - 19, throne.y - 15); }
         if (finaleSequence) { const kneeling = finaleTimer > 2.1, servantFloor = hallFloor; ctx.fillStyle = '#d1a77d'; ctx.fillRect(servantX - 6, servantFloor - (kneeling ? 43 : 62), 17, 13); ctx.fillStyle = '#2b3039'; ctx.fillRect(servantX - 10, servantFloor - (kneeling ? 30 : 49), 25, kneeling ? 25 : 38); ctx.fillStyle = '#7f2434'; ctx.fillRect(servantX - 14, servantFloor - (kneeling ? 34 : 53), 33, 9); ctx.fillStyle = '#151922'; ctx.fillRect(servantX - 8, servantFloor - 7, 12, 7); ctx.fillRect(servantX + (kneeling ? 2 : 7), servantFloor - 7, kneeling ? 20 : 10, 7); ctx.fillStyle = '#9b7634'; ctx.fillRect(servantX - 5, servantFloor - (kneeling ? 39 : 58), 15, 3); }
       }
+      for (const column of throneColumns) drawThroneColumn(ctx, column);
       for (const spike of spikes) {
         ctx.fillStyle = '#05070a'; ctx.fillRect(spike.x - 3, spike.y + spike.h - 5, spike.w + 6, 8);
         for (let x = spike.x; x < spike.x + spike.w; x += 15) { ctx.beginPath(); ctx.moveTo(x, spike.y + spike.h); ctx.lineTo(x + 7, spike.y); ctx.lineTo(x + 15, spike.y + spike.h); ctx.closePath(); ctx.fillStyle = '#252a31'; ctx.fill(); ctx.strokeStyle = '#020305'; ctx.lineWidth = 2; ctx.stroke(); ctx.fillStyle = '#e2e8f0'; ctx.fillRect(x + 6, spike.y + 3, 2, 6); }
         ctx.fillStyle = '#9a6b22'; ctx.fillRect(spike.x, spike.y + spike.h - 4, spike.w, 4); ctx.fillStyle = '#fbbf24'; ctx.fillRect(spike.x + 4, spike.y + spike.h - 4, spike.w - 8, 1);
+      }
+      // A second, screen-space light pass is drawn after the level geometry so
+      // torchlight softly washes over nearby walls and platforms as it flickers.
+      if (!bridgeLayout && !castleLayout) {
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'screen';
+        for (const torch of torches) {
+          const x = ((torch.x - camera * .22) % (W + 220)) - 30, y = ((torch.y - cameraY * .35) % (H + 140)) - 40;
+          const pulse = 1 + Math.sin(now * 7.5 + torch.phase) * .055 + Math.sin(now * 13.7 + torch.phase * 1.6) * .025;
+          const light = ctx.createRadialGradient(x, y, 8, x, y, 112 * pulse);
+          light.addColorStop(0, 'rgba(255,205,115,.105)'); light.addColorStop(.42, 'rgba(255,145,48,.045)'); light.addColorStop(1, 'rgba(255,105,24,0)');
+          ctx.fillStyle = light; ctx.fillRect(x - 125, y - 125, 250, 250);
+        }
+        ctx.restore();
       }
       for (const reward of explorationRewards) {
         const centerX = reward.x + reward.w / 2, baseY = reward.y + reward.h;
@@ -1915,7 +2115,7 @@ export default function App() {
         ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 13px ui-sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`${stageTwoBoss.name} · BOSS 1`, camera + viewW / 2, barY - 9);
         ctx.fillStyle = '#2b1217'; ctx.fillRect(barX, barY, barW, 11); ctx.fillStyle = location === 'swamps' ? '#65a30d' : '#f59e0b'; ctx.fillRect(barX, barY, barW * Math.max(0, stageTwoBoss.hp / stageTwoBoss.maxHp), 11); ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, barW, 11); ctx.textAlign = 'start';
       }
-      for (const p of projectiles) { const orb = p.kind === 'magicOrb'; ctx.shadowColor = orb ? '#c084fc' : 'transparent'; ctx.shadowBlur = orb ? 16 : 0; ctx.fillStyle = p.kind === 'poisonBurst' ? '#84cc16' : p.kind === 'gear' ? '#94a3b8' : p.kind === 'grenade' ? '#f5b942' : p.kind === 'freeze' ? '#67e8f9' : p.kind === 'enemyBomb' ? '#ff7a45' : p.kind === 'enemyArrow' || orb ? '#c084fc' : '#dce8e7'; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.kind === 'gear') { ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(p.x - 3, p.y - 3, p.w + 6, p.h + 6); } ctx.shadowBlur = 0; }
+      for (const p of projectiles) { const orb = p.kind === 'magicOrb'; ctx.shadowColor = orb ? '#c084fc' : 'transparent'; ctx.shadowBlur = orb ? 16 : 0; ctx.fillStyle = p.kind === 'poisonBurst' ? '#84cc16' : p.kind === 'gear' ? '#94a3b8' : p.kind === 'grenade' ? '#f5b942' : p.kind === 'freeze' ? '#67e8f9' : p.kind === 'enemyBomb' ? '#ff7a45' : p.kind === 'enemyArrow' || orb ? '#c084fc' : '#dce8e7'; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.kind === 'trapArrow') { ctx.fillStyle = '#7c2d12'; ctx.fillRect(p.x - Math.sign(p.vx) * 7, p.y - 2, 8, 9); } if (p.kind === 'gear') { ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(p.x - 3, p.y - 3, p.w + 6, p.h + 6); } ctx.shadowBlur = 0; }
       for (const explosion of explosions) {
         const progress = 1 - explosion.life / explosion.maxLife, size = Math.round(explosion.radius * progress), alpha = Math.max(0, 1 - progress);
         const frozen = explosion.kind === 'freeze';
@@ -1923,22 +2123,40 @@ export default function App() {
         ctx.globalAlpha = alpha; ctx.strokeStyle = frozen ? (progress < .45 ? '#ecfeff' : '#67e8f9') : (progress < .45 ? '#fff3a3' : '#ff7a45'); ctx.lineWidth = Math.max(2, Math.round(9 * (1 - progress))); ctx.beginPath(); ctx.arc(explosion.x, explosion.y, size, 0, Math.PI * 2); ctx.stroke();
         const core = Math.max(2, Math.round(34 * (1 - progress))); ctx.fillStyle = frozen ? '#cffafe' : '#fff7c2'; ctx.beginPath(); ctx.arc(explosion.x, explosion.y, core, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
       }
-      for (const ghost of playerGhosts) { ctx.save(); ctx.globalAlpha = Math.max(0, ghost.life / .22) * .32; ctx.translate(ghost.x + player.w / 2, ghost.y + player.h / 2); if (ghost.facing < 0) ctx.scale(-1, 1); ctx.fillStyle = '#67e8f9'; ctx.fillRect(-12, -9, 25, 18); ctx.fillRect(-9, -25, 18, 14); ctx.fillRect(-11, 8, 8, 19); ctx.fillRect(5, 8, 8, 19); ctx.fillStyle = '#fde68a'; ctx.fillRect(9, -10, 6, 24); ctx.restore(); }
-      for (const p of particles) { ctx.globalAlpha = Math.min(1, p.life * 3); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); } ctx.globalAlpha = 1;
+      for (const ghost of playerGhosts) drawShadowDashGhost(ctx, ghost, player.w, player.h, now);
+      for (const p of particles) {
+        const alpha = p.maxLife ? Math.max(0, p.life / p.maxLife) : Math.min(1, p.life * 3);
+        ctx.globalAlpha = alpha; ctx.fillStyle = p.color;
+        if (!p.shape || p.shape === 'square') ctx.fillRect(p.x, p.y, p.size, p.size);
+        else {
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rotation ?? 0);
+          if (p.shape === 'smoke') { ctx.beginPath(); ctx.arc(0, 0, p.size * (.65 + (1 - alpha) * .65), 0, Math.PI * 2); ctx.fill(); }
+          else { ctx.beginPath(); ctx.moveTo(-p.size, -1); ctx.lineTo(p.size, -p.size * .22); ctx.lineTo(p.size * .45, p.size * .28); ctx.closePath(); ctx.fill(); }
+          ctx.restore();
+        }
+      }
+      ctx.globalAlpha = 1;
       if (player.focus > 0) { const pulse = 24 + player.focus * 22; ctx.strokeStyle = `rgba(220,255,247,${.25 + player.focus * .65})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x + player.w / 2, player.y + player.h / 2, pulse, 0, Math.PI * 2); ctx.stroke(); }
-      ctx.save(); ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
+      ctx.save(); ctx.translate(player.x + player.w / 2, player.y + player.h);
       const idleBreath = player.grounded && Math.abs(player.vx) < 25 ? 1 + Math.sin(now * 3.2) * .025 : 1;
-      const airborneStretch = !player.grounded && Math.abs(player.vy) > 90 ? 1.12 : 1;
-      const landingSquash = player.landSquash > 0 ? .8 + (.16 - player.landSquash) / .16 * .2 : 1;
-      const spriteScaleY = idleBreath * airborneStretch * landingSquash, spriteScaleX = player.landSquash > 0 ? 1.18 : airborneStretch > 1 ? .92 : 1;
-      ctx.scale(spriteScaleX, spriteScaleY); if (player.facing < 0) ctx.scale(-1, 1); if (player.roll > 0) { ctx.scale(1.35, .65); ctx.rotate(.08); }
+      const jumpStretch = !player.grounded && player.vy < -60 ? Math.min(.12, (-player.vy - 60) / 4200) : 0;
+      const squashProgress = player.landSquash > 0 && player.landSquashMax > 0 ? player.landSquash / player.landSquashMax : 0;
+      const squashAmount = Math.sin(squashProgress * Math.PI) * .2;
+      const dashScaleX = player.roll > .1 ? 1.3 : 1;
+      const dashScaleY = player.roll > .1 ? .8 : 1;
+      const spriteScaleY = idleBreath * (1 + jumpStretch) * (1 - squashAmount) * dashScaleY;
+      const spriteScaleX = (1 - jumpStretch * .65) * (1 + squashAmount * .9) * dashScaleX;
+      ctx.scale(spriteScaleX, spriteScaleY); ctx.translate(0, -player.h / 2); if (player.facing < 0) ctx.scale(-1, 1); if (player.roll > 0) ctx.rotate(.08);
       if (!player.dead) {
         const damageBlink = player.hurt > 0 && Math.floor(player.hurt * 22) % 2 === 0;
         if (player.hurt > 0) ctx.globalAlpha = damageBlink ? .3 : 1;
-        drawWalkingLegs(ctx, { phase: now * Math.min(11, 3.5 + Math.abs(player.vx) * .025), moving: player.grounded && Math.abs(player.vx) > 25 && player.roll <= 0, legColor: '#334155', bootColor: '#17212a', legWidth: 8, bootWidth: 9, bootHeight: 9 });
-        ctx.fillStyle = damageBlink ? '#ffffff' : player.roll > 0 ? '#5b5d62' : '#3f4145'; ctx.fillRect(-12, -9, 25, 18); ctx.fillStyle = damageBlink ? '#e5e7eb' : '#25272b'; ctx.fillRect(-15, -12, 30, 6); ctx.fillRect(-14, -18, 7, 17); ctx.fillStyle = damageBlink ? '#ffffff' : '#18191c'; ctx.fillRect(-8, -5, 17, 4);
-        ctx.fillStyle = '#090a0c'; ctx.fillRect(-9, -25, 18, 14); ctx.fillStyle = '#292b2f'; ctx.fillRect(-10, -29, 20, 7); ctx.fillRect(-12, -25, 6, 12); ctx.fillStyle = '#dc2626'; ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 9; ctx.fillRect(4, -20, 4, 3); ctx.shadowBlur = 0;
-        ctx.fillStyle = '#a47b32'; ctx.fillRect(9, -10, 7, 25); ctx.fillRect(-12, 7, 25, 4); ctx.fillStyle = '#6f5428'; ctx.fillRect(13, -5, 6, 13); ctx.fillRect(-18, -3, 6, 13); ctx.fillStyle = '#1f2023'; ctx.fillRect(-10, 10, 5, 3); ctx.fillRect(5, -7, 6, 3);
+        const knightPose = { time: now, speed: Math.abs(player.vx), grounded: player.grounded, rolling: player.roll > 0, damaged: damageBlink };
+        if (player.roll > 0) drawPlayerLungePose(ctx, now, damageBlink);
+        else {
+          drawPlayerCape(ctx, knightPose);
+          drawWalkingLegs(ctx, { phase: now * Math.min(11, 3.5 + Math.abs(player.vx) * .025), moving: player.grounded && Math.abs(player.vx) > 25, legColor: '#34343f', bootColor: '#15151b', legWidth: 8, bootWidth: 9, bootHeight: 9 });
+          drawPlayerKnight(ctx, knightPose);
+        }
         if (player.guard > 0) { const perfect = player.guardAge <= .2; ctx.shadowColor = perfect ? '#fff7ae' : '#facc15'; ctx.shadowBlur = perfect ? 16 : 5; ctx.fillStyle = perfect ? '#fff7ae' : '#facc15'; ctx.fillRect(15, -18, 12, 36); ctx.strokeStyle = '#fff1a8'; ctx.lineWidth = 2; ctx.strokeRect(15, -18, 12, 36); ctx.shadowBlur = 0; }
       }
       ctx.save();
@@ -2079,6 +2297,7 @@ export default function App() {
   return (
     <main className="h-screen h-dvh overflow-hidden bg-[#090e12] font-sans text-slate-100 selection:bg-teal-300/30">
       {!started && !choosingLoadout && <div ref={menuSceneRef} onMouseMove={moveMenuParallax} className="dead-menu fixed inset-0 z-[90] overflow-hidden bg-[#10152d] text-slate-100">
+        <EnvironmentParticles/>
         <div className="dead-menu-sky"/><div className="dead-menu-sun"/>
         <svg className="dead-menu-clouds-svg dead-menu-clouds-far" viewBox="0 0 1600 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g className="cloud-bank cloud-bank-a"><circle cx="120" cy="180" r="62"/><circle cx="185" cy="153" r="91"/><circle cx="274" cy="176" r="72"/><circle cx="337" cy="196" r="48"/><path d="M55 206Q140 164 230 195T390 205Q350 244 90 235Z"/></g><g className="cloud-bank cloud-bank-b"><circle cx="710" cy="112" r="48"/><circle cx="765" cy="87" r="73"/><circle cx="840" cy="108" r="60"/><circle cx="900" cy="126" r="41"/><path d="M650 137Q744 99 824 129T950 142Q886 171 690 164Z"/></g><g className="cloud-bank cloud-bank-c"><circle cx="1245" cy="205" r="70"/><circle cx="1320" cy="163" r="105"/><circle cx="1420" cy="194" r="82"/><circle cx="1491" cy="218" r="49"/><path d="M1170 233Q1280 181 1380 220T1555 237Q1480 274 1210 265Z"/></g></svg>
         <div className="dead-menu-sea"/>
@@ -2175,6 +2394,7 @@ export default function App() {
               window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE', bubbles: true }));
             }}
           />
+          <EnvironmentParticles/>
           {started && <MobileControls slots={slots} activeSlot={activeSlot} paused={paused} />}
           {started && debugOpen && <aside className="absolute bottom-12 left-3 z-[35] w-64 border border-cyan-300/30 bg-[#050b10]/90 p-3 text-left shadow-[0_12px_40px_rgba(0,0,0,.65)] backdrop-blur-md md:bottom-4 md:left-4">
             <div className="mb-3 flex items-center justify-between"><div><p className="text-[8px] font-black uppercase tracking-[.28em] text-cyan-300">Developer</p><h3 className="text-sm font-black uppercase text-slate-100">Debug Panel</h3></div><button type="button" onClick={() => setDebugOpen(false)} aria-label="Закрыть Debug Panel" title="Закрыть" className="grid h-7 w-7 place-items-center border border-white/15 text-base text-slate-400 transition hover:border-cyan-300/60 hover:text-cyan-100">×</button></div>

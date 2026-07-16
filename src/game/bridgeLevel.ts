@@ -3,11 +3,13 @@ export type BridgeBox = { x: number; y: number; w: number; h: number };
 export const BRIDGE_WORLD = { width: 5000, height: 1000 } as const;
 
 export type BridgePlatform = BridgeBox & { kind: 'stone' | 'suspension' | 'rubble' };
+export type BridgeWind = { cycle: number; activeFor: number; strength: number };
 
 export type BridgeLevel = {
   terrain: BridgeBox[];
   platforms: BridgePlatform[];
   abyssSpikes: BridgeBox[];
+  wind: BridgeWind;
 };
 
 export const createBridgeLevel = (): BridgeLevel => {
@@ -44,5 +46,14 @@ export const createBridgeLevel = (): BridgeLevel => {
     terrain,
     platforms,
     abyssSpikes: [{ x: 0, y: 965, w: BRIDGE_WORLD.width, h: 35 }],
+    wind: { cycle: 8, activeFor: 3.2, strength: 760 },
   };
+};
+
+export const bridgeWindAmount = (time: number, wind: BridgeWind) => {
+  const phase = time % wind.cycle;
+  if (phase >= wind.activeFor) return 0;
+  const envelope = Math.sin(Math.PI * phase / wind.activeFor);
+  const direction = Math.floor(time / wind.cycle) % 2 ? -1 : 1;
+  return direction * wind.strength * envelope;
 };

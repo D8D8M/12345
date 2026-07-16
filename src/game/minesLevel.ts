@@ -4,6 +4,7 @@ export type MineObstacle = MineBox & { kind: 'barricade' | 'cart' };
 export type MineShaft = { x: number; y: number; length: number; kind: 'chain' | 'ladder' };
 export type MineRail = { x: number; y: number; w: number };
 export type MineOre = { x: number; y: number; color: string; size: number };
+export type MineCart = MineBox & { baseX: number; minX: number; maxX: number; vx: number; moving: boolean };
 
 export const MINES_WORLD = { width: 4000, height: 2500 } as const;
 
@@ -14,6 +15,7 @@ export type MinesLevel = {
   rails: MineRail[];
   ores: MineOre[];
   supports: MineBox[];
+  carts: MineCart[];
 };
 
 const oreColors = ['#38bdf8', '#a78bfa', '#34d399', '#f59e0b', '#fb7185'];
@@ -22,6 +24,7 @@ const oreColors = ['#38bdf8', '#a78bfa', '#34d399', '#f59e0b', '#fb7185'];
 export const createMinesLevel = (rooms: MineRoom[], columns: number): MinesLevel => {
   const platforms: MineBox[] = [], obstacles: MineObstacle[] = [], shafts: MineShaft[] = [];
   const rails: MineRail[] = [], ores: MineOre[] = [], supports: MineBox[] = [];
+  const carts: MineCart[] = [];
   for (const room of rooms) {
     const floorY = room.y + room.h - 42;
     const upperY = room.y + 245;
@@ -29,7 +32,11 @@ export const createMinesLevel = (rooms: MineRoom[], columns: number): MinesLevel
     // A continuous upper bypass makes every ground-level blockage fair.
     platforms.push({ x: room.x + 62, y: upperY, w: 270, h: 18 }, { x: room.x + 390, y: upperY, w: 348, h: 18 });
     platforms.push({ x: room.x + 145, y: floorY - 112, w: 120, h: 16 }, { x: room.x + 535, y: floorY - 112, w: 120, h: 16 });
-    if (room.id % 2 === 0) rails.push({ x: room.x + 45, y: floorY - 7, w: room.w - 90 });
+    if (room.id % 2 === 0) {
+      const rail = { x: room.x + 45, y: floorY - 7, w: room.w - 90 };
+      rails.push(rail);
+      if (room.id % 4 === 0) carts.push({ x: rail.x + 75, y: floorY - 62, w: 92, h: 55, baseX: rail.x + 75, minX: rail.x, maxX: rail.x + rail.w, vx: 0, moving: false });
+    }
     const hasVerticalPassage = room.connections.has(room.id - columns) || room.connections.has(room.id + columns);
     if (room.id % 3 === 1 && room.col > 0 && room.col < columns - 1 && !hasVerticalPassage) {
       // Vertical exits use the middle of a room. The old x + 344 placement
@@ -51,5 +58,5 @@ export const createMinesLevel = (rooms: MineRoom[], columns: number): MinesLevel
       for (let step = 0; step < 5; step++) platforms.push({ x: centerX + (step % 2 ? 26 : -112), y: room.y + room.h - 82 + step * 125, w: 86, h: 14 });
     }
   }
-  return { platforms, obstacles, shafts, rails, ores, supports };
+  return { platforms, obstacles, shafts, rails, ores, supports, carts };
 };

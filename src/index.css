@@ -188,5 +188,10 @@ section.aspect-video > div.absolute.inset-0.z-20 > div.grid > div.max-w-2xl > p:
 @keyframes castle-window-flicker { from{opacity:.68}to{opacity:1} }
 @keyframes castle-flag-wave { from{transform:skewY(-4deg) scaleX(.92)}to{transform:skewY(7deg) scaleX(1.06)} }
 @keyframes gothic-flag-tremble { from{transform:skewY(-7deg) scaleX(.88)}to{transform:skewY(9deg) scaleX(1.05)} }
+.environment-particles { position:absolute; inset:0; z-index:6; overflow:hidden; pointer-events:none; }
+.environment-particles i { position:absolute; bottom:-5%; display:block; border-radius:999px; background:rgba(213,247,255,.9); opacity:0; box-shadow:0 0 4px rgba(125,211,252,.95),0 0 10px rgba(45,212,191,.5); animation:environment-particle-rise linear infinite; will-change:transform,opacity; }
+.environment-particles i:nth-child(3n) { background:rgba(255,224,156,.95); box-shadow:0 0 4px rgba(251,191,36,.9),0 0 11px rgba(249,115,22,.35); }
+.environment-particles i:nth-child(4n) { filter:blur(.45px); }
+@keyframes environment-particle-rise { 0%{transform:translate3d(0,8vh,0) scale(.55);opacity:0} 12%{opacity:.65} 72%{opacity:.4} 100%{transform:translate3d(var(--particle-drift),-112vh,0) scale(1.15);opacity:0} }
 @media(max-width:700px){.dead-menu-castle-architecture,.dead-menu-castle-battlements,.dead-menu-castle-window-details{left:18%;bottom:17%;min-width:560px;height:59vh;opacity:.62}.dead-menu-cliff{right:35%}.dead-submenu{max-height:78vh;overflow-y:auto}.dead-menu-item{font-size:2.25rem}.dead-menu-sun{left:55%}}
-@media(prefers-reduced-motion:reduce){.dead-menu-clouds,.dead-menu-mist,.dead-menu-sea::after{animation:none}.dead-menu *{transition-duration:.01ms!important}}
+@media(prefers-reduced-motion:reduce){.dead-menu-clouds,.dead-menu-mist,.dead-menu-sea::after,.environment-particles i{animation:none}.environment-particles{display:none}.dead-menu *{transition-duration:.01ms!important}}

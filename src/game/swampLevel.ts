@@ -4,6 +4,7 @@ export type SwampPlatform = SwampBox & {
   route: 'main' | 'deadEnd';
   branchId?: number;
   rewardNode?: boolean;
+  sinkable?: boolean;
 };
 
 export const SWAMP_WORLD = { width: 7000, height: 4000, poisonY: 3840 } as const;
@@ -85,6 +86,7 @@ const createSwampRoute = (): SwampPlatform[] => {
       h: growsFromSwamp ? SWAMP_WORLD.poisonY - y : 18,
       kind: growsFromSwamp ? 'hummock' : index % 9 === 4 ? 'bridge' : index % 11 === 7 ? 'swing' : 'branch',
       route: 'main',
+      sinkable: growsFromSwamp || index % 9 === 4,
     };
     if (!appendChecked(platforms, candidate)) break;
     const gap = gaps[index % gaps.length];
@@ -167,13 +169,13 @@ const platforms = [...mainRoute, ...createDeadEndBranches(mainRoute)];
 
 export const createSwampLevel = () => ({
   terrain: [
-    ...platforms.filter(({ kind }) => kind === 'hummock').map(({ kind: _kind, route: _route, branchId: _branchId, rewardNode: _rewardNode, ...box }) => box),
+    ...platforms.filter(({ kind }) => kind === 'hummock').map(({ kind: _kind, route: _route, branchId: _branchId, rewardNode: _rewardNode, sinkable: _sinkable, ...box }) => box),
     // Physical boss room: ceiling, upper entrance wall and a continuous floor.
     { x: routeEnd, y: 2585, w: 1100, h: 42 },
     { x: routeEnd, y: 2585, w: 42, h: 350 },
     { x: routeEnd, y: 3235, w: 1100, h: SWAMP_WORLD.poisonY - 3235 },
   ],
-  oneWays: platforms.filter(({ kind }) => kind !== 'hummock').map(({ kind: _kind, route: _route, branchId: _branchId, rewardNode: _rewardNode, ...box }) => box),
+  oneWays: platforms.filter(({ kind }) => kind !== 'hummock').map(({ kind: _kind, route: _route, branchId: _branchId, rewardNode: _rewardNode, sinkable: _sinkable, ...box }) => box),
   platforms: platforms.map((platform) => ({ ...platform })),
   rewardNodes: platforms.filter(({ rewardNode }) => rewardNode).map((platform) => ({ ...platform })),
   boundaries: [

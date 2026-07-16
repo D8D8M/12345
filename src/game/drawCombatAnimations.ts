@@ -48,11 +48,14 @@ export const drawPlayerSword = (
   ctx.beginPath(); ctx.moveTo(19, -1); ctx.lineTo(52, -1); ctx.stroke();
   ctx.restore();
   if (progress > .22 && progress < .82) {
-    ctx.globalAlpha = Math.sin((progress - .22) / .6 * Math.PI) * .55;
-    ctx.strokeStyle = '#f8e9b0'; ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(7, 0, 48, -1.35, 1.15);
-    ctx.stroke(); ctx.globalAlpha = 1;
+    const glow = Math.sin((progress - .22) / .6 * Math.PI);
+    ctx.save(); ctx.globalAlpha = glow * .28; ctx.strokeStyle = '#67e8f9'; ctx.lineCap = 'round';
+    ctx.shadowColor = '#a5f3fc'; ctx.shadowBlur = 18; ctx.lineWidth = 15;
+    ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
+    ctx.globalAlpha = glow * .7; ctx.strokeStyle = '#e0f2fe'; ctx.shadowBlur = 10; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
+    ctx.globalAlpha = glow * .9; ctx.strokeStyle = '#ffffff'; ctx.shadowBlur = 0; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke(); ctx.restore();
   }
 };
 
