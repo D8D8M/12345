@@ -11,4 +11,14 @@ if (!url || !anonKey) {
   );
 }
 
+// Old email/OAuth links can leave an expired implicit-flow token in the hash.
+// Remove it before GoTrue initializes so it cannot replace a valid local session.
+if (typeof window !== 'undefined' && window.location.hash) {
+  const authHash = new URLSearchParams(window.location.hash.slice(1));
+  const expiresAt = Number(authHash.get('expires_at'));
+  if (authHash.has('access_token') && Number.isFinite(expiresAt) && expiresAt * 1000 <= Date.now()) {
+    window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+  }
+}
+
 export const supabase = createClient(url, anonKey);

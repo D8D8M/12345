@@ -4,8 +4,8 @@
 
 :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color-scheme: dark; }
 * { box-sizing: border-box; }
-html, body, #root { min-height: 100%; margin: 0; }
-body { background: #090e12; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { background: #090e12; overscroll-behavior: none; }
 button { font: inherit; cursor: pointer; }
 
 /* Жанровый ярлык в главном меню скрыт — остаются название и сюжет. */
