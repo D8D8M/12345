@@ -161,16 +161,15 @@ export default function App() {
   };
 
   useEffect(() => {
-    const held = new Set<string>();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
-      if (event.code === 'KeyN' && !['INPUT', 'SELECT', 'TEXTAREA'].includes((event.target as HTMLElement)?.tagName)) { event.preventDefault(); unlockAchievement('reality_hack'); noClipModeRef.current = !noClipModeRef.current; setNoClipMode(noClipModeRef.current); return; }
-      if (event.code === 'Tab') { held.add('Tab'); if (held.has('Backquote')) { event.preventDefault(); unlockAchievement('reality_hack'); setDebugOpen((open) => !open); } return; }
-      if (event.code === 'Backquote') { held.add('Backquote'); if (held.has('Tab')) { event.preventDefault(); unlockAchievement('reality_hack'); setDebugOpen((open) => !open); } }
+      const isFormControl = ['INPUT', 'SELECT', 'TEXTAREA'].includes((event.target as HTMLElement)?.tagName);
+      if (isFormControl) return;
+      if (event.code === 'KeyN') { event.preventDefault(); unlockAchievement('reality_hack'); noClipModeRef.current = !noClipModeRef.current; setNoClipMode(noClipModeRef.current); return; }
+      if (event.code === 'Backquote' || event.code === 'F2') { event.preventDefault(); unlockAchievement('reality_hack'); setDebugOpen((open) => !open); }
     };
-    const onKeyUp = (event: KeyboardEvent) => held.delete(event.code);
-    window.addEventListener('keydown', onKeyDown, true); window.addEventListener('keyup', onKeyUp, true);
-    return () => { window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener('keyup', onKeyUp, true); };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
   useEffect(() => {
@@ -1903,7 +1902,7 @@ export default function App() {
               </select>
               <button onClick={debugKillRoom} className="mt-1 border border-red-400/30 bg-red-950/20 px-3 py-2 text-left text-red-200 hover:border-red-300/70">Убить врагов в комнате</button>
             </div>
-            <p className="mt-3 text-[7px] uppercase tracking-[.16em] text-slate-600">Tab + Ё/~ — закрыть · N — NoClip</p>
+            <p className="mt-3 text-[7px] uppercase tracking-[.16em] text-slate-600">Ё/~ или F2 — закрыть · N — NoClip</p>
           </aside>}
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/60 to-transparent p-4 md:p-6">
             <div className="relative flex max-w-[260px] flex-wrap gap-2 md:max-w-[360px]">{Array.from({ length: hud.maxHp }, (_, index) => { const filled = index < hud.hp, justBroken = !filled && index === hud.hp; return <span key={`${index}-${justBroken ? maskHitPulse : 0}`} className={`mask-icon ${filled ? 'mask-icon-full' : 'mask-icon-empty'} ${justBroken ? 'mask-icon-crack' : ''}`}><i/><b/></span>; })}{maskHitPulse > 0 && <span key={`mask-shards-${maskHitPulse}`} className="pointer-events-none absolute left-0 top-2 h-8 w-24">{Array.from({ length: 8 }, (_, index) => <i key={index} className="mask-hud-shard" style={{ left: `${8 + index * 7}px`, animationDelay: `${index * .018}s` }}/>)}</span>}</div>
