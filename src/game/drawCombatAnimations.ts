@@ -88,7 +88,7 @@ export const enemyAttackDuration = (kind: string, variant: string) => {
   if (kind === 'mage') return .45;
   if (kind === 'shield') return .36;
   if (kind === 'rightHand' || kind === 'boss') return .42;
-  if (kind === 'zombie') return variant === 'rottenPrisoner' ? .6 : variant === 'clockworkSoldier' || variant === 'royalGuard' ? .18 : .3;
+  if (kind === 'zombie') return variant === 'rottenPrisoner' ? .6 : variant === 'blindMiner' ? .16 : variant === 'clockworkSoldier' || variant === 'royalGuard' ? .18 : .3;
   return Math.max(.35, 1);
 };
 

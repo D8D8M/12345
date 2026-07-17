@@ -26,8 +26,8 @@ export const createCastleMirrors = (rooms: PalaceRoom[], roomW: number, roomH: n
 export const createCrossbowStatues = (rooms: PalaceRoom[], roomW: number, roomH: number): CrossbowStatue[] => rooms
   .filter((room) => (room.id + room.row) % 3 === 1)
   .map((room, index) => ({
-    x: room.x + (index % 2 ? roomW - 76 : 40), y: room.y + roomH - 178,
-    w: 36, h: 72, facing: index % 2 ? -1 : 1, cooldown: index % 2,
+    x: room.x + (index % 2 ? roomW - 82 : 26), y: room.y + roomH * .43,
+    w: 56, h: 44, facing: index % 2 ? -1 : 1, cooldown: index % 2,
   }));
 
 export const createThroneColumns = (ceilingY: number, floorY: number): ThroneColumn[] => [190, 390, 660, 860].map((x) => ({
@@ -49,11 +49,20 @@ export const drawCastleMirror = (ctx: CanvasRenderingContext2D, mirror: CastleMi
 };
 
 export const drawCrossbowStatue = (ctx: CanvasRenderingContext2D, statue: CrossbowStatue) => {
-  ctx.save(); ctx.translate(statue.x + statue.w / 2, statue.y); ctx.scale(statue.facing, 1);
-  ctx.fillStyle = '#77707d'; ctx.fillRect(-18, 25, 36, 47); ctx.fillStyle = '#a69eaa'; ctx.fillRect(-14, 5, 28, 25);
-  ctx.fillStyle = '#292532'; ctx.fillRect(3, 12, 6, 4); ctx.strokeStyle = '#4b2d20'; ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.moveTo(8, 31); ctx.lineTo(42, 31); ctx.stroke();
-  ctx.strokeStyle = '#d6c5a6'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(25, 18); ctx.lineTo(42, 31); ctx.lineTo(25, 44); ctx.stroke(); ctx.restore();
+  const centerX = statue.x + statue.w / 2, centerY = statue.y + statue.h / 2;
+  ctx.save();
+  // A broad bolted plate and triangular braces make this read as architecture,
+  // not as an invulnerable humanoid enemy.
+  ctx.fillStyle = '#292832'; ctx.fillRect(statue.x - 4, statue.y - 6, statue.w + 8, statue.h + 12);
+  ctx.strokeStyle = '#756f78'; ctx.lineWidth = 3; ctx.strokeRect(statue.x - 4, statue.y - 6, statue.w + 8, statue.h + 12);
+  ctx.fillStyle = '#a59ca5';
+  for (const [x, y] of [[statue.x + 4, statue.y + 2], [statue.x + statue.w - 8, statue.y + 2], [statue.x + 4, statue.y + statue.h - 6], [statue.x + statue.w - 8, statue.y + statue.h - 6]]) ctx.fillRect(x, y, 4, 4);
+  ctx.strokeStyle = '#665f69'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(centerX, centerY); ctx.lineTo(centerX - statue.facing * 18, statue.y + statue.h + 12); ctx.moveTo(centerX, centerY); ctx.lineTo(centerX - statue.facing * 18, statue.y - 12); ctx.stroke();
+  ctx.translate(centerX, centerY); ctx.scale(statue.facing, 1);
+  ctx.fillStyle = '#4b2d20'; ctx.fillRect(-15, -4, 59, 8); ctx.fillStyle = '#b7a27d'; ctx.fillRect(8, -2, 42, 4);
+  ctx.strokeStyle = '#d6c5a6'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(18, -18); ctx.lineTo(44, 0); ctx.lineTo(18, 18); ctx.stroke();
+  ctx.strokeStyle = '#887b68'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(18, -18); ctx.lineTo(18, 18); ctx.stroke();
+  ctx.fillStyle = '#18171d'; ctx.fillRect(-9, 4, 12, 10); ctx.restore();
 };
 
 export const drawThroneColumn = (ctx: CanvasRenderingContext2D, column: ThroneColumn) => {
@@ -64,5 +73,32 @@ export const drawThroneColumn = (ctx: CanvasRenderingContext2D, column: ThroneCo
   ctx.fillStyle = marble; ctx.fillRect(column.x, column.y, column.w, column.h);
   ctx.fillStyle = '#e7e5e4'; ctx.fillRect(column.x - 13, column.y, column.w + 26, 18); ctx.fillRect(column.x - 18, column.y + column.h - 24, column.w + 36, 24);
   ctx.strokeStyle = 'rgba(71,85,105,.45)'; ctx.beginPath(); ctx.moveTo(column.x + 19, column.y + 45); ctx.lineTo(column.x + 35, column.y + 120); ctx.lineTo(column.x + 23, column.y + 215); ctx.stroke();
+  ctx.restore();
+};
+
+export const drawFinalStoneWall = (ctx: CanvasRenderingContext2D, wall: FinalBox) => {
+  ctx.save();
+  const stone = ctx.createLinearGradient(wall.x, 0, wall.x + wall.w, 0);
+  stone.addColorStop(0, '#17191d'); stone.addColorStop(.22, '#4b4b4d');
+  stone.addColorStop(.7, '#292a2d'); stone.addColorStop(1, '#0d0f12');
+  ctx.fillStyle = stone; ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+  ctx.strokeStyle = '#08090b'; ctx.lineWidth = 4; ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+
+  const courseH = 46;
+  ctx.lineWidth = 3;
+  for (let row = 0, y = wall.y; y < wall.y + wall.h; row++, y += courseH) {
+    ctx.strokeStyle = row % 3 === 0 ? '#77716b' : '#555250';
+    ctx.beginPath(); ctx.moveTo(wall.x + 3, y); ctx.lineTo(wall.x + wall.w - 3, y); ctx.stroke();
+    const offset = row % 2 ? wall.w * .32 : wall.w * .68;
+    ctx.beginPath(); ctx.moveTo(wall.x + offset, y); ctx.lineTo(wall.x + offset, Math.min(y + courseH, wall.y + wall.h)); ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#a39b92'; ctx.lineWidth = 2; ctx.globalAlpha = .48;
+  ctx.beginPath();
+  ctx.moveTo(wall.x + wall.w * .55, wall.y + 90);
+  ctx.lineTo(wall.x + wall.w * .35, wall.y + wall.h * .36);
+  ctx.lineTo(wall.x + wall.w * .65, wall.y + wall.h * .55);
+  ctx.lineTo(wall.x + wall.w * .38, wall.y + wall.h - 80);
+  ctx.stroke();
   ctx.restore();
 };

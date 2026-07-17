@@ -29,6 +29,16 @@ const horizontalEdgeGap = (from: SwampBox, to: SwampBox) => to.x >= from.x
   ? to.x - (from.x + from.w)
   : from.x - (to.x + to.w);
 
+const PLATFORM_CLEARANCE = 56;
+
+const isClearOfOtherPlatforms = (candidate: SwampBox, connected: SwampBox, platforms: SwampBox[]) =>
+  platforms.every((platform) => {
+    if (platform === connected) return true;
+    const horizontalGap = Math.max(0, platform.x - (candidate.x + candidate.w), candidate.x - (platform.x + platform.w));
+    const verticalGap = Math.max(0, platform.y - (candidate.y + candidate.h), candidate.y - (platform.y + platform.h));
+    return horizontalGap >= PLATFORM_CLEARANCE || verticalGap >= PLATFORM_CLEARANCE;
+  });
+
 /** Every generated graph edge passes through this check before placement. */
 export const isValidStageTwoPlatformStep = (from: SwampBox, to: SwampBox) => {
   const horizontalGap = horizontalEdgeGap(from, to);
@@ -138,26 +148,36 @@ const createDeadEndBranches = (mainRoute: SwampPlatform[]): SwampPlatform[] => {
   anchorIndexes.forEach((anchorIndex, branchId) => {
     const anchor = mainRoute[anchorIndex];
     if (!anchor) return;
-    const direction = branchId % 2 === 0 ? 1 : -1;
+    const branchStart = branches.length;
+    let direction = branchId % 2 === 0 ? 1 : -1;
     let previous = anchor;
 
     for (let step = 0; step < heightChanges.length; step += 1) {
       const width = step === heightChanges.length - 1 ? 150 : 126;
       const gap = gaps[step];
-      const candidate: SwampPlatform = {
-        x: direction > 0 ? previous.x + previous.w + gap : previous.x - gap - width,
-        y: previous.y + heightChanges[step],
-        w: width,
-        h: 16,
-        kind: 'branch',
-        route: 'deadEnd',
-        branchId,
+      const makeCandidate = (candidateDirection: number): SwampPlatform => ({
+        x: candidateDirection > 0 ? previous.x + previous.w + gap : previous.x - gap - width,
+        y: previous.y + heightChanges[step], w: width, h: 16, kind: 'branch', route: 'deadEnd', branchId,
         rewardNode: step === heightChanges.length - 1,
-      };
-      if (candidate.x < 44 || candidate.x + candidate.w > routeEnd || !isValidStageTwoPlatformStep(previous, candidate)) break;
+      });
+      let candidate = makeCandidate(direction);
+      const occupiedPlatforms = [...mainRoute, ...branches];
+      if (!isClearOfOtherPlatforms(candidate, previous, occupiedPlatforms)) {
+        const opposite = makeCandidate(-direction);
+        if (isClearOfOtherPlatforms(opposite, previous, occupiedPlatforms)) {
+          candidate = opposite;
+          direction *= -1;
+        }
+      }
+      if (candidate.x < 44 || candidate.x + candidate.w > routeEnd
+        || !isValidStageTwoPlatformStep(previous, candidate)
+        || !isClearOfOtherPlatforms(candidate, previous, occupiedPlatforms)) break;
       branches.push(candidate);
       previous = candidate;
     }
+    // A clearance conflict may shorten a branch; its actual last safe ledge
+    // remains the exploration reward instead of silently removing that reward.
+    if (branches.length > branchStart) branches[branches.length - 1].rewardNode = true;
   });
 
   return branches;

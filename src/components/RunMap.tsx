@@ -1,0 +1,29 @@
+import { useEffect, useState } from 'react';
+import type { LocationMapSnapshot, MapLocation, RunMapArchive } from '../game/mapTypes';
+
+const NAMES: Record<MapLocation, string> = { prison: 'Тюремные камеры', swamps: 'Ядовитая низина', mines: 'Заброшенные шахты', clock: 'Часовая башня', crypt: 'Склеп павших', bridge: 'Разрушенный мост', castle: 'Королевский замок', throne: 'Тронный зал' };
+type Props = { archive: RunMapArchive; currentLocation: MapLocation; onClose: () => void };
+
+export function RunMap({ archive, currentLocation, onClose }: Props) {
+  const available = (Object.keys(archive) as MapLocation[]).filter((key) => archive[key]);
+  const [selected, setSelected] = useState<MapLocation>(archive[currentLocation] ? currentLocation : available[0]);
+  useEffect(() => { if (archive[currentLocation]) setSelected(currentLocation); }, [archive, currentLocation]);
+  const map = archive[selected];
+  return <div className="absolute inset-0 z-[55] grid grid-rows-[auto_auto_minmax(0,1fr)_auto] bg-[#03070b]/95 p-3 backdrop-blur-md md:p-4">
+    <header className="flex items-center justify-between gap-4 border-b border-cyan-300/20 pb-2"><div className="flex min-w-0 items-baseline gap-3"><p className="shrink-0 text-[8px] font-black uppercase tracking-[.32em] text-cyan-300">Карта забега</p><h2 className="truncate text-lg font-black uppercase md:text-2xl">{map ? NAMES[selected] : 'Нет открытых мест'}</h2></div><button onClick={onClose} className="shrink-0 border border-white/15 px-3 py-1.5 text-[9px] font-black uppercase text-slate-300 hover:border-cyan-300/60">Tab · Закрыть</button></header>
+    <nav className="flex min-w-0 gap-2 overflow-x-auto py-2">{available.map((key) => <button key={key} onClick={() => setSelected(key)} className={`shrink-0 border px-3 py-1.5 text-[8px] font-black uppercase tracking-[.1em] ${selected === key ? 'border-cyan-300 bg-cyan-300/10 text-cyan-100' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>{NAMES[key]}</button>)}</nav>
+    <div className="relative min-h-0 overflow-hidden border border-white/10 bg-[#071017]">{map && <ExactMap snapshot={map} showPlayer={selected === currentLocation}/>}</div>
+    <footer className="flex items-center gap-4 overflow-hidden pt-2 text-[7px] font-bold uppercase tracking-[.12em] text-slate-500"><span className="shrink-0"><i className="mr-2 inline-block h-2 w-4 bg-slate-500"/>Стены и платформы</span><span className="shrink-0"><i className="mr-2 inline-block h-1 w-4 bg-cyan-400"/>Сквозная</span><span className="shrink-0"><i className="mr-2 inline-block h-1 w-4 bg-red-500 shadow-[0_0_5px_#ef4444]"/>Кислота / шипы</span><span className="shrink-0"><i className="mr-2 inline-block h-2 w-2 rotate-45 bg-amber-300"/>Вы здесь</span><span className="truncate">Туман скрывает места, где вы не были</span></footer>
+  </div>;
+}
+
+function ExactMap({ snapshot, showPlayer }: { snapshot: LocationMapSnapshot; showPlayer: boolean }) {
+  const visited = new Set(snapshot.visitedRoomIds), rooms = snapshot.rooms.filter((room) => visited.has(room.id));
+  const fallbackAreas = rooms.map((room) => ({ x: room.x + room.w / 2, y: room.y + room.h / 2, radius: Math.max(room.w, room.h) * .55 }));
+  const areas = snapshot.exploredAreas?.length ? snapshot.exploredAreas : fallbackAreas;
+  if (!areas.length) return null;
+  const minX = Math.max(0, Math.min(...areas.map((area) => area.x - area.radius))), minY = Math.max(0, Math.min(...areas.map((area) => area.y - area.radius)));
+  const maxX = Math.min(snapshot.worldWidth, Math.max(...areas.map((area) => area.x + area.radius))), maxY = Math.min(snapshot.worldHeight, Math.max(...areas.map((area) => area.y + area.radius)));
+  const padding = Math.max(40, (maxX - minX) * .025), viewBox = `${minX - padding} ${minY - padding} ${maxX - minX + padding * 2} ${maxY - minY + padding * 2}`;
+  return <svg className="h-full w-full" viewBox={viewBox} preserveAspectRatio="xMidYMid meet" aria-label="Точная карта платформ"><defs><pattern id="map-grid" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M80 0H0V80" fill="none" stroke="#16303c" strokeWidth="2"/></pattern><clipPath id="explored-path">{areas.map((area, index) => <circle key={index} cx={area.x} cy={area.y} r={area.radius}/>)}</clipPath></defs><rect x={minX - padding} y={minY - padding} width={maxX - minX + padding * 2} height={maxY - minY + padding * 2} fill="#03090d"/><g clipPath="url(#explored-path)"><rect x={minX - padding} y={minY - padding} width={maxX - minX + padding * 2} height={maxY - minY + padding * 2} fill="url(#map-grid)"/>{snapshot.platforms.map((platform, index) => <g key={index}><rect x={platform.x} y={platform.y} width={Math.max(platform.w, 3)} height={platform.kind === 'oneWay' ? Math.max(6, platform.h * .35) : Math.max(platform.h, 5)} rx={platform.kind === 'oneWay' ? 3 : 0} fill={platform.kind === 'oneWay' ? '#22d3ee' : '#657985'} stroke={platform.kind === 'oneWay' ? '#a5f3fc' : '#a8bac2'} strokeWidth="2" opacity={platform.kind === 'oneWay' ? .95 : .88}/>{platform.kind === 'solid' && platform.h > 18 && <path d={`M${platform.x + 8} ${platform.y + 8}H${platform.x + platform.w - 8}`} stroke="#314955" strokeWidth="4" strokeDasharray="18 10"/>}</g>)}{(snapshot.hazards ?? []).map((hazard, index) => <g key={`hazard-${index}`}><line x1={hazard.x} y1={hazard.y + 2} x2={hazard.x + hazard.w} y2={hazard.y + 2} stroke="#7f1d1d" strokeWidth="13" opacity=".65"/><line x1={hazard.x} y1={hazard.y + 2} x2={hazard.x + hazard.w} y2={hazard.y + 2} stroke="#ef4444" strokeWidth="6" strokeDasharray={hazard.kind === 'spikes' ? '10 5' : undefined}/></g>)}</g>{showPlayer && snapshot.player && <g transform={`translate(${snapshot.player.x} ${snapshot.player.y})`}><circle r="22" fill="#fbbf24" opacity=".13"/><rect x="-9" y="-9" width="18" height="18" transform="rotate(45)" fill="#fbbf24" stroke="#fef3c7" strokeWidth="3"/><circle r="3" fill="#fff"/></g>}</svg>;
+}
