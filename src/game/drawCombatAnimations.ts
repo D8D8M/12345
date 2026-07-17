@@ -8,6 +8,7 @@ export const drawPlayerSword = (
   remaining: number,
   duration: number,
   direction: number,
+  bladeColor = '#cbd5e1',
 ) => {
   if (remaining <= 0) return;
   const progress = clamp01(1 - remaining / Math.max(.01, duration));
@@ -22,14 +23,14 @@ export const drawPlayerSword = (
     ctx.rotate(direction < 0 ? -Math.PI / 2 : Math.PI / 2);
     ctx.strokeStyle = '#6f5428'; ctx.lineWidth = 6; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(10, 0); ctx.stroke();
-    ctx.strokeStyle = '#f8e9b0'; ctx.lineWidth = 5;
+    ctx.strokeStyle = bladeColor; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(49, 0); ctx.stroke();
     ctx.strokeStyle = '#fffbea'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(13, -1); ctx.lineTo(47, -1); ctx.stroke();
     ctx.restore();
     if (progress > .28 && progress < .78) {
       ctx.globalAlpha = Math.sin((progress - .28) / .5 * Math.PI) * .45;
-      ctx.strokeStyle = '#f8e9b0'; ctx.lineWidth = 4;
+      ctx.strokeStyle = bladeColor; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.moveTo(-10, direction < 0 ? -35 : 35); ctx.lineTo(10, direction < 0 ? -76 : 76); ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -42,17 +43,17 @@ export const drawPlayerSword = (
   ctx.rotate(angle);
   ctx.strokeStyle = '#6f5428'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(17, 0); ctx.stroke();
-  ctx.strokeStyle = '#f8e9b0'; ctx.lineWidth = 5;
+  ctx.strokeStyle = bladeColor; ctx.lineWidth = 5;
   ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(54, 0); ctx.stroke();
   ctx.strokeStyle = '#fffbea'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(19, -1); ctx.lineTo(52, -1); ctx.stroke();
   ctx.restore();
   if (progress > .22 && progress < .82) {
     const glow = Math.sin((progress - .22) / .6 * Math.PI);
-    ctx.save(); ctx.globalAlpha = glow * .28; ctx.strokeStyle = '#67e8f9'; ctx.lineCap = 'round';
-    ctx.shadowColor = '#a5f3fc'; ctx.shadowBlur = 18; ctx.lineWidth = 15;
+    ctx.save(); ctx.globalAlpha = glow * .16; ctx.strokeStyle = '#94a3b8'; ctx.lineCap = 'round';
+    ctx.shadowColor = '#e2e8f0'; ctx.shadowBlur = 4; ctx.lineWidth = 10;
     ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
-    ctx.globalAlpha = glow * .7; ctx.strokeStyle = '#e0f2fe'; ctx.shadowBlur = 10; ctx.lineWidth = 6;
+    ctx.globalAlpha = glow * .4; ctx.strokeStyle = '#cbd5e1'; ctx.shadowBlur = 2; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
     ctx.globalAlpha = glow * .9; ctx.strokeStyle = '#ffffff'; ctx.shadowBlur = 0; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke(); ctx.restore();

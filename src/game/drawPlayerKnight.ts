@@ -9,6 +9,7 @@ type KnightPose = {
 export const drawPlayerCape = (
   ctx: CanvasRenderingContext2D,
   { time, speed, grounded, rolling, damaged }: KnightPose,
+  capeColor = '#050505',
 ) => {
   const run = Math.min(1, speed / 230);
   const lift = grounded ? run : Math.min(1, Math.abs(speed) / 180 + .3);
@@ -17,7 +18,7 @@ export const drawPlayerCape = (
   const tailY = 19 - lift * 13;
 
   ctx.save();
-  ctx.fillStyle = damaged ? '#f8fafc' : rolling ? '#34313d' : '#17131e';
+  ctx.fillStyle = damaged ? '#f8fafc' : rolling ? '#34313d' : capeColor;
   ctx.strokeStyle = damaged ? '#ffffff' : '#30283b';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -38,6 +39,7 @@ export const drawPlayerCape = (
 export const drawPlayerKnight = (
   ctx: CanvasRenderingContext2D,
   { time, speed, grounded, rolling, damaged }: KnightPose,
+  maskGlow = '#ef4444',
 ) => {
   const run = grounded ? Math.min(1, speed / 230) : 0;
   const armSwing = Math.sin(time * (8 + run * 7)) * run * 2;
@@ -70,7 +72,7 @@ export const drawPlayerKnight = (
   ctx.strokeStyle = damaged ? '#fff' : '#777b88'; ctx.lineWidth = 1.2; ctx.stroke();
   ctx.fillStyle = '#08090d';
   ctx.beginPath(); ctx.moveTo(0, -23); ctx.lineTo(11, -21); ctx.lineTo(14, -18); ctx.lineTo(1, -18); ctx.closePath(); ctx.fill();
-  ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 9;
+  ctx.shadowColor = maskGlow; ctx.shadowBlur = 9;
   ctx.fillStyle = damaged ? '#fff' : '#ff394d';
   ctx.beginPath(); ctx.ellipse(7, -20, 2.4, 1.25, 0, 0, Math.PI * 2); ctx.fill();
   ctx.shadowBlur = 0;
@@ -78,11 +80,11 @@ export const drawPlayerKnight = (
   ctx.beginPath(); ctx.moveTo(2, -16); ctx.lineTo(10, -16); ctx.lineTo(13, -14); ctx.lineTo(1, -14); ctx.closePath(); ctx.fill();
 };
 
-export const drawPlayerLungePose = (ctx: CanvasRenderingContext2D, time: number, damaged = false) => {
+export const drawPlayerLungePose = (ctx: CanvasRenderingContext2D, time: number, damaged = false, capeColor = '#050505', maskGlow = '#ef4444') => {
   ctx.save();
   ctx.translate(3, 7);
   ctx.rotate(.16);
-  drawPlayerCape(ctx, { time, speed: 440, grounded: true, rolling: true, damaged });
+  drawPlayerCape(ctx, { time, speed: 440, grounded: true, rolling: true, damaged }, capeColor);
 
   // Compact crouched dash: both legs stay under and behind the torso. This
   // reads as a powerful forward step without turning into a split pose.
@@ -94,7 +96,7 @@ export const drawPlayerLungePose = (ctx: CanvasRenderingContext2D, time: number,
   ctx.beginPath(); ctx.moveTo(7, 22); ctx.lineTo(14, 22); ctx.moveTo(-16, 20); ctx.lineTo(-22, 20); ctx.stroke();
 
   ctx.save(); ctx.translate(4, -4); ctx.rotate(-.16);
-  drawPlayerKnight(ctx, { time, speed: 440, grounded: true, rolling: true, damaged });
+  drawPlayerKnight(ctx, { time, speed: 440, grounded: true, rolling: true, damaged }, maskGlow);
   ctx.restore();
   ctx.restore();
 };

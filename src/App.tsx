@@ -9,7 +9,7 @@ import { drawPlayerCape, drawPlayerKnight, drawPlayerLungePose } from './game/dr
 import { createTeleportPortals, drawTeleportPortal } from './components/TeleportPortals';
 import { supabase } from './lib/supabase';
 import { createSwampLevel, SWAMP_WORLD, type SwampPlatform } from './game/swampLevel';
-import { createGasBubbles, createSinkingPlatforms, updateGasBubble, updateSinkingPlatform } from './game/swampHazards';
+import { createSinkingPlatforms, updateSinkingPlatform } from './game/swampHazards';
 import { drawMines } from './game/drawMines';
 import { drawEarlyEnemy, earlyEnemySizes, earlyEnemySpriteSizes, isEarlyEnemyVariant } from './game/drawEarlyEnemies';
 import { drawUniqueBoss, uniqueBossSizes, uniqueBossSpriteSizes } from './game/drawUniqueBoss';
@@ -39,6 +39,14 @@ import { BestiaryBook } from './components/BestiaryBook';
 import { RecordsTable } from './components/RecordsTable';
 import { loadBestiaryProgress, recordBestiaryKill } from './game/bestiary';
 import { saveRunRecord } from './lib/runRecords';
+import { comboForHits, EMPTY_COMBO, type CombatCombo } from './game/combatCombo';
+import { createRoomEvents } from './game/roomEvents';
+import { BossTrialsMenu } from './components/BossTrialsMenu';
+import { loadBossTrialProgress, recordBossTrialClear, trialRewardTier, type BossTrial } from './game/bossTrials';
+import { playCombatHit, startBiomeMusic, stopBiomeMusic } from './game/combatAudio';
+import { ELITE_INFO, eliteDamageMultiplier, rollEliteModifier, type EliteModifier } from './game/eliteEnemies';
+import { cosmeticForProgress } from './game/cosmetics';
+import { loadBestRunGhost, saveBestRunGhost, type GhostFrame } from './game/runGhost';
 
 type Hud = { hp: number; maxHp: number; shards: number; kills: number; grenade: number; trap: number; message: string };
 type Box = { x: number; y: number; w: number; h: number };
@@ -48,7 +56,9 @@ type WeaponReplacement = { gear: Gear; slots: [number, number]; cost?: number };
 type RunProgress = { hp: number; maxHp: number; damage: number; shards: number; cells?: number; relics: RelicId[]; mapArchive: RunMapArchive; loadout: [Gear, Gear, Gear, Gear] };
 type PermanentProgress = { maxHpBonus: number; damageBonus: number };
 type SavedGame = { savedAt: string; sector: number; location: LocationKind; progress: RunProgress; mode: RunMode; elapsedSeconds: number };
-type GameSettings = { musicVolume: number; effectsVolume: number; screenShake: boolean };
+type BindAction = 'left' | 'right' | 'up' | 'down' | 'jump' | 'attack' | 'heal' | 'interact' | 'roll' | 'slot1' | 'slot2' | 'slot3' | 'slot4';
+type KeyBindings = Record<BindAction, string>;
+type GameSettings = { musicVolume: number; effectsVolume: number; screenShake: boolean; bindings: KeyBindings };
 type LocationKind = 'prison' | 'swamps' | 'mines' | 'clock' | 'crypt' | 'bridge' | 'castle' | 'throne';
 type SectorTheme = { name: string; subtitle: string; center: string; middle: string; edge: string; stone: string; mortar: string; accent: string; accentGlow: string; flame: string; flameCore: string; mist: string };
 type RunStats = { startedAt: number; kills: number; damageTaken: number; bossesDefeated: number; deathCause?: string };
@@ -105,6 +115,13 @@ function EnvironmentParticles() {
 
 const MAX_PERMANENT_MASKS = 5;
 const SAVE_SLOT_COUNT = 4;
+const DEFAULT_BINDINGS: KeyBindings = { left: 'KeyA', right: 'KeyD', up: 'KeyW', down: 'KeyS', jump: 'Space', attack: 'KeyJ', heal: 'KeyF', interact: 'KeyE', roll: 'ShiftLeft', slot1: 'Digit1', slot2: 'Digit2', slot3: 'Digit3', slot4: 'Digit4' };
+const BINDING_ITEMS: Array<{ action: BindAction; label: string }> = [
+  { action: 'left', label: 'Влево' }, { action: 'right', label: 'Вправо' }, { action: 'up', label: 'Вверх / удар вверх' }, { action: 'down', label: 'Вниз / спрыгнуть' },
+  { action: 'jump', label: 'Прыжок' }, { action: 'attack', label: 'Атака' }, { action: 'heal', label: 'Лечение Душой' }, { action: 'interact', label: 'Действие' }, { action: 'roll', label: 'Перекат' },
+  { action: 'slot1', label: 'Слот 1' }, { action: 'slot2', label: 'Слот 2' }, { action: 'slot3', label: 'Слот 3' }, { action: 'slot4', label: 'Слот 4' },
+];
+const keyName = (code: string) => ({ Space: 'Пробел', ShiftLeft: 'Левый Shift', ShiftRight: 'Правый Shift', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' }[code] || code.replace(/^Key/, '').replace(/^Digit/, ''));
 const loadAchievements = (): AchievementId[] => {
   try { const saved = JSON.parse(localStorage.getItem('false-knight-achievements') || '[]') as AchievementId[]; return saved.filter((id) => ACHIEVEMENTS.some((item) => item.id === id)); }
   catch { return []; }
@@ -162,7 +179,7 @@ const loadSaveSlots = (): Array<SavedGame | null> => {
   try { const slots = JSON.parse(localStorage.getItem('ashfall-save-slots') || '[]') as unknown[]; return Array.from({ length: SAVE_SLOT_COUNT }, (_, index) => normalizeSave(slots[index])); }
   catch { return Array.from({ length: SAVE_SLOT_COUNT }, () => null); }
 };
-const loadSettings = (): GameSettings => { try { return { musicVolume: 55, effectsVolume: 70, screenShake: true, ...JSON.parse(localStorage.getItem('false-knight-settings') || '{}') }; } catch { return { musicVolume: 55, effectsVolume: 70, screenShake: true }; } };
+const loadSettings = (): GameSettings => { try { const saved = JSON.parse(localStorage.getItem('false-knight-settings') || '{}'); const bindings = { ...DEFAULT_BINDINGS, ...(saved.bindings || {}) }; if (bindings.heal === 'KeyQ') bindings.heal = 'KeyF'; return { musicVolume: 55, effectsVolume: 70, screenShake: true, ...saved, bindings }; } catch { return { musicVolume: 55, effectsVolume: 70, screenShake: true, bindings: { ...DEFAULT_BINDINGS } }; } };
 const loadAutosave = (): SavedGame | null => {
   try { return normalizeSave(JSON.parse(localStorage.getItem('ashfall-autosave') || 'null')); }
   catch { return null; }
@@ -175,6 +192,7 @@ export default function App() {
   const selectedSlot = useRef(0);
   const [activeSlot, setActiveSlot] = useState(0);
   const [hud, setHud] = useState<Hud>({ hp: 5, maxHp: 5, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
+  const [combatCombo, setCombatCombo] = useState<CombatCombo>(EMPTY_COMBO);
   const [soulHud, setSoulHud] = useState(0);
   const [maskHitPulse, setMaskHitPulse] = useState(0);
   const [started, setStarted] = useState(false);
@@ -204,7 +222,7 @@ export default function App() {
   const [pendingDestination, setPendingDestination] = useState<Exclude<LocationKind, 'prison'>>('swamps');
   const [, refreshShop] = useState(0);
   const [menuTab, setMenuTab] = useState<'play' | 'saves' | 'achievements'>('play');
-  const [mainMenuScreen, setMainMenuScreen] = useState<'main' | 'saves' | 'settings' | 'achievements' | 'bestiary' | 'records'>('main');
+  const [mainMenuScreen, setMainMenuScreen] = useState<'main' | 'saves' | 'settings' | 'achievements' | 'bestiary' | 'records' | 'trials'>('main');
   const [bestiaryProgress, setBestiaryProgress] = useState(loadBestiaryProgress);
   const menuSceneRef = useRef<HTMLDivElement>(null);
   const [saveSlots, setSaveSlots] = useState<Array<SavedGame | null>>(loadSaveSlots);
@@ -213,7 +231,12 @@ export default function App() {
   const [choosingLoadout, setChoosingLoadout] = useState(false);
   const [choosingMode, setChoosingMode] = useState(false);
   const [runMode, setRunMode] = useState<RunMode>('normal');
+  const [bossTrial, setBossTrial] = useState<BossTrial | null>(null);
+  const [bossTrialProgress, setBossTrialProgress] = useState(loadBossTrialProgress);
+  const [trialRewardMessage, setTrialRewardMessage] = useState('');
+  const bossTrialRef = useRef<BossTrial | null>(null);
   const runElapsed = useRef(0);
+  const timedGhostFrames = useRef<GhostFrame[]>([]);
   const savedRecordForRun = useRef(false);
   const [elapsedHud, setElapsedHud] = useState(0);
   const [startingWeapons, setStartingWeapons] = useState<GearKind[]>(['sword', 'bow']);
@@ -224,6 +247,7 @@ export default function App() {
   const settingsOpenRef = useRef(false);
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const settingsRef = useRef(settings);
+  const [capturingBinding, setCapturingBinding] = useState<BindAction | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [godMode, setGodMode] = useState(false);
   const godModeRef = useRef(false);
@@ -316,6 +340,38 @@ export default function App() {
     settingsRef.current = settings; localStorage.setItem('false-knight-settings', JSON.stringify(settings));
   }, [settings]);
 
+  useEffect(() => {
+    if (!capturingBinding) return;
+    const capture = (event: KeyboardEvent) => {
+      event.preventDefault(); event.stopPropagation();
+      if (event.code === 'Escape') { setCapturingBinding(null); return; }
+      const reserved = ['F2', 'Backquote', 'Tab'];
+      if (reserved.includes(event.code)) return;
+      setSettings((current) => {
+        const bindings = { ...current.bindings };
+        const conflicting = (Object.keys(bindings) as BindAction[]).find((action) => action !== capturingBinding && bindings[action] === event.code);
+        if (conflicting) bindings[conflicting] = bindings[capturingBinding];
+        bindings[capturingBinding] = event.code;
+        return { ...current, bindings };
+      });
+      setCapturingBinding(null);
+    };
+    window.addEventListener('keydown', capture, true);
+    return () => window.removeEventListener('keydown', capture, true);
+  }, [capturingBinding]);
+
+  const bindingsPanel = (compact = false) => <div>
+    <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-black uppercase tracking-[.25em] text-orange-200/70">Управление</p><button onClick={() => setSettings((current) => ({ ...current, bindings: { ...DEFAULT_BINDINGS } }))} className="text-[8px] font-black uppercase tracking-[.14em] text-slate-500 hover:text-cyan-200">Сбросить</button></div>
+    <div className={`mt-3 grid grid-cols-2 gap-2 ${compact ? '' : 'md:grid-cols-3'}`}>{BINDING_ITEMS.map(({ action, label }) => <button key={action} onClick={() => setCapturingBinding(action)} className={`border p-3 text-left text-[9px] transition ${capturingBinding === action ? 'border-amber-300 bg-amber-300/10 text-amber-100' : 'border-white/10 bg-black/25 text-slate-400 hover:border-cyan-300/40'}`}><kbd className="font-black text-slate-100">{capturingBinding === action ? 'Нажмите клавишу…' : keyName(settings.bindings[action])}</kbd><span className="mt-1 block">{label}</span></button>)}</div>
+    {capturingBinding && <p className="mt-2 text-[9px] text-slate-500">Esc — отмена. Если клавиша занята, привязки поменяются местами.</p>}
+  </div>;
+
+  useEffect(() => {
+    if (!started) { stopBiomeMusic(); return; }
+    startBiomeMusic(location, settings.musicVolume);
+    return stopBiomeMusic;
+  }, [started, location, settings.musicVolume]);
+
   useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
   useEffect(() => { pauseBestiaryOpenRef.current = pauseBestiaryOpen; }, [pauseBestiaryOpen]);
 
@@ -384,7 +440,20 @@ export default function App() {
     const theme = themeForLocation(location);
     const enemyHealthScale = (1 + (sector - 1) * .18) * (runMode === 'hardcore' ? 1.35 : 1);
 
-    const W = 1280, H = 720, ZOOM = 1.35, viewW = W / ZOOM, viewH = H / ZOOM;
+    const ZOOM = 1.35;
+    let W = Math.max(320, Math.round(canvas.clientWidth || window.innerWidth));
+    let H = Math.max(240, Math.round(canvas.clientHeight || window.innerHeight));
+    let viewW = W / ZOOM, viewH = H / ZOOM;
+    const resizeCanvas = () => {
+      const nextWidth = Math.max(320, Math.round(canvas.clientWidth));
+      const nextHeight = Math.max(240, Math.round(canvas.clientHeight));
+      if (canvas.width === nextWidth && canvas.height === nextHeight) return;
+      canvas.width = nextWidth; canvas.height = nextHeight;
+      W = nextWidth; H = nextHeight; viewW = W / ZOOM; viewH = H / ZOOM;
+      ctx.imageSmoothingEnabled = false;
+    };
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
     const throneScene = location === 'throne', prisonLayout = location === 'prison', cryptLayout = location === 'crypt', swampLayout = location === 'swamps', mineLayout = location === 'mines', clockLayout = location === 'clock', bridgeLayout = location === 'bridge', castleLayout = location === 'castle';
     // Stage 1 is a deliberately dense 3100x2000 scrolling dungeon. Other biomes
     // keep their larger room scale, while Cells reads as one continuous tilemap.
@@ -683,11 +752,14 @@ export default function App() {
     if (cryptLayout || bridgeLayout) { solids.push(...arenaGates); projectileBlockers.push(...arenaGates); }
     type EnemyKind = 'zombie' | 'crossbow' | 'shield' | 'bomber' | 'mage' | 'totem' | 'slime' | 'flyer' | 'wraith' | 'boss' | 'rightHand';
     type EnemyVariant = 'rottenPrisoner' | 'summonedPrisoner' | 'cappedArcher' | 'marshSlime' | 'swampTotem' | 'bogShaman' | 'blindMiner' | 'dynamiteTosser' | 'minecartDefender' | 'clockworkSoldier' | 'gearFlyer' | 'towerSniper' | 'wraith' | 'necromancer' | 'cryptTotem' | 'bridgeKnight' | 'gargoyleBomber' | 'royalGuard' | 'royalSorcerer' | 'swampGiant' | 'stoneGolem' | 'cryptWarden' | 'bridgeColossus' | 'rightHand';
-    type Enemy = Box & { kind: EnemyKind; variant: EnemyVariant; name: string; vx: number; vy: number; patrolSpeed: number; hp: number; maxHp: number; left: number; right: number; homeY: number; facing: number; alert: number; alertTimer: number; sawPlayer: boolean; turnDelay: number; hurt: number; attack: number; cooldown: number; blocked: number; stunned: number; frozen?: number; guardTriggered: boolean; defeated: boolean; dead: boolean; dormant?: boolean; specialAttack?: 1 | 2; specialPhase?: number };
-    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'trapArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean };
+    type StatusKind = 'burning' | 'poisoned' | 'electrified';
+    type StatusEffect = { life: number; tick: number; stacks: number; maskProgress?: number };
+    type StatusState = Partial<Record<StatusKind, StatusEffect>>;
+    type Enemy = Box & { kind: EnemyKind; variant: EnemyVariant; name: string; vx: number; vy: number; patrolSpeed: number; hp: number; maxHp: number; left: number; right: number; homeY: number; facing: number; alert: number; alertTimer: number; sawPlayer: boolean; turnDelay: number; hurt: number; attack: number; cooldown: number; blocked: number; stunned: number; frozen?: number; statuses?: StatusState; guardTriggered: boolean; defeated: boolean; dead: boolean; dormant?: boolean; specialAttack?: 1 | 2; specialPhase?: number; phaseTwo?: boolean; phaseTransition?: number; elite?: EliteModifier; eliteCooldown?: number };
+    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'trapArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean; originX?: number };
     type RockWarning = Box & { life: number; delay: number };
     type BossWarning = Box & { life: number; delay: number; hit: boolean; kind: 'spike' | 'geyser' };
-    type Hazard = Box & { life: number; kind: 'poison'; tick: number; delay: number };
+    type Hazard = Box & { life: number; kind: 'poison' | 'fire'; tick: number; delay: number };
     type ShardDrop = Box & { vx: number; vy: number; value: number; life: number };
     type Trap = Box & { life: number; damage: number; triggered: boolean };
     type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number; maxLife?: number; shape?: 'square' | 'smoke' | 'shard'; rotation?: number; spin?: number };
@@ -891,12 +963,15 @@ export default function App() {
       // Edge platforms can meet a perimeter wall. Skip one without a full gap
       // instead of leaving its enemy embedded in that wall.
       if (x === undefined) return [];
-      const elite = variant === 'royalGuard' || variant === 'royalSorcerer', hp = Math.round((kind === 'totem' ? 90 : elite ? 145 : kind === 'mage' ? 68 : kind === 'slime' ? 38 : 58) * enemyHealthScale);
+      const royalElite = variant === 'royalGuard' || variant === 'royalSorcerer';
+      const elite = kind === 'totem' ? undefined : rollEliteModifier();
+      const baseHp = Math.round((kind === 'totem' ? 90 : royalElite ? 145 : kind === 'mage' ? 68 : kind === 'slime' ? 38 : 58) * enemyHealthScale);
+      const hp = elite === 'armored' ? Math.round(baseHp * 1.45) : baseHp;
       const speed = variant === 'rottenPrisoner' ? 42 : variant === 'blindMiner' ? 105 : variant === 'clockworkSoldier' ? 125 : variant === 'royalGuard' ? 105 : kind === 'shield' ? 32 : kind === 'bomber' ? 28 : kind === 'slime' ? 55 : 0;
       // Only true aerial archetypes ignore gravity. Bridge gargoyles use the
       // same ground and one-way platform collisions as the bridge knights.
       const flying = kind === 'flyer' || kind === 'wraith';
-      return [{ kind, variant, name, x, y: flying ? platform.y - h - 100 : platform.y - h, w, h, vx: speed * (Math.random() < .5 ? -1 : 1), vy: 0, patrolSpeed: speed, hp, maxHp: hp, left, right, homeY: flying ? platform.y - h - 100 : platform.y - h, facing: 1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: .5 + Math.random(), blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false }];
+      return [{ kind, variant, name, x, y: flying ? platform.y - h - 100 : platform.y - h, w, h, vx: speed * (Math.random() < .5 ? -1 : 1), vy: 0, patrolSpeed: speed, hp, maxHp: hp, left, right, homeY: flying ? platform.y - h - 100 : platform.y - h, facing: 1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: .5 + Math.random(), blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, elite, eliteCooldown: elite === 'teleporter' ? 2.2 + Math.random() * 1.8 : undefined }];
     });
     const bossLocation = location === 'swamps' || location === 'mines';
     if (bossLocation) {
@@ -914,6 +989,14 @@ export default function App() {
       const variant: EnemyVariant = location === 'crypt' ? 'cryptWarden' : 'bridgeColossus';
       const bossSize = uniqueBossSizes[variant], bossY = bridgeLayout ? 610 - bossSize.h : arenaRoom.y + roomH - wall - bossSize.h;
       enemies.push({ kind: 'boss', variant, name: location === 'crypt' ? 'Страж Склепа' : 'Мостовой Колосс', x: arenaRoom.x + roomW - 245, y: bossY, w: bossSize.w, h: bossSize.h, vx: 0, vy: 0, patrolSpeed: 0, hp: 750, maxHp: 750, left: arenaRoom.x + wall + 45, right: arenaRoom.x + roomW - wall - 45, homeY: bossY, facing: -1, alert: 0, alertTimer: .8, sawPlayer: true, turnDelay: 0, hurt: 0, attack: 0, cooldown: 1.2, blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, dormant: bridgeLayout });
+    }
+    const currentTrial = bossTrialRef.current;
+    if (currentTrial) {
+      for (let index = enemies.length - 1; index >= 0; index--) if (enemies[index].kind !== 'boss' && enemies[index].kind !== 'rightHand') enemies.splice(index, 1);
+      for (const boss of enemies) {
+        boss.dormant = false; boss.sawPlayer = true; boss.alert = 1;
+        if (currentTrial.modifier === 'empowered') { boss.hp *= 2; boss.maxHp *= 2; boss.patrolSpeed *= 1.2; }
+      }
     }
     // Keep the initial spawn area calm so the player cannot appear beside a regular enemy.
     for (let index = enemies.length - 1; index >= 0; index--) {
@@ -933,7 +1016,17 @@ export default function App() {
         ally.left = Math.max(ally.left, totem.x - 125); ally.right = Math.min(ally.right, totem.x + totem.w + 125);
       }
     }
-    const player = { x: spawnX, y: spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, bounceLock: 0, bow: 0, bowMax: 0, guard: 0, guardAge: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, landSquashMax: 0, trailTimer: 0, dustTimer: 0, dead: false };
+    const trialBoss = currentTrial ? enemies.find((enemy) => enemy.kind === 'boss' || enemy.kind === 'rightHand') : undefined;
+    const player = { x: trialBoss ? Math.max(trialBoss.left + 30, trialBoss.x - 240) : spawnX, y: trialBoss ? trialBoss.homeY + trialBoss.h - 56 : spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, bounceLock: 0, bow: 0, bowMax: 0, guard: 0, guardAge: 0, parry: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, landSquashMax: 0, trailTimer: 0, dustTimer: 0, statuses: {} as StatusState, dead: false };
+    const bossKillCount = ['swampGiant', 'stoneGolem', 'cryptWarden', 'bridgeColossus', 'rightHand'].reduce((total, id) => total + (bestiaryProgress[id] ?? 0), 0);
+    const earnedTrialTier = trialRewardTier(loadBossTrialProgress().seals);
+    const baseCosmetic = cosmeticForProgress(unlockedAchievements.size, bossKillCount);
+    const cosmetic = earnedTrialTier >= 3
+      ? { name: 'Владыка арены', cape: '#3f0b18', maskGlow: '#fbbf24', weapon: '#fb7185', trail: '#f59e0b' }
+      : baseCosmetic;
+    const bestGhost = runMode === 'timed' ? loadBestRunGhost() : null;
+    const ghostRecording = timedGhostFrames.current;
+    let ghostSampleTimer = 0;
     const castleMirrors = castleLayout ? createCastleMirrors(rooms, roomW, roomH) : [];
     const crossbowStatues = castleLayout ? createCrossbowStatues(rooms, roomW, roomH) : [];
     const throneColumns = throneScene ? createThroneColumns(startRoom.y + wall, startRoom.y + roomH - wall) : [];
@@ -970,6 +1063,12 @@ export default function App() {
       .filter((platform, index, all) => all.indexOf(platform) === index)
       .slice(0, sectorLoot.length);
     const loot: Loot[] = sectorLoot.map((gear, index) => ({ x: lootPlatforms[index].x + lootPlatforms[index].w / 2 - 13, y: lootPlatforms[index].y - 30, w: 26, h: 26, gear, collected: false, phase: Math.random() * Math.PI * 2, shardValue: 8 + sector * 2 }));
+    const eventPlatforms = deadEndRewardRooms.flatMap((room) => [...terrain, ...oneWays].filter((platform) =>
+      platform.x >= room.x + wall && platform.x + platform.w <= room.x + roomW - wall
+      && platform.y > room.y + wall && platform.y <= room.y + roomH - wall
+      && platform.w >= 90 && !lootPlatforms.includes(platform)))
+      .sort(() => Math.random() - .5);
+    const roomEvents = location === 'throne' ? [] : createRoomEvents(eventPlatforms, sector);
     dropReplacedWeapon.current = (gear) => {
       loot.push({
         x: player.x + player.w / 2 - 13,
@@ -1017,7 +1116,6 @@ export default function App() {
     const keys = new Set<string>(), pressed = new Set<string>();
     const projectiles: Projectile[] = [], hazards: Hazard[] = [], shardDrops: ShardDrop[] = [], playerGhosts: ShadowDashGhost[] = [], traps: Trap[] = [], particles: Particle[] = [], gateFragments: GateFragment[] = [], explosions: Explosion[] = [], rockWarnings: RockWarning[] = [], bossWarnings: BossWarning[] = [];
     const sinkingPlatforms = swampLevel ? createSinkingPlatforms(swampPlatforms, terrain, oneWays) : [];
-    const gasBubbles = swampLevel ? createGasBubbles(SWAMP_WORLD.width, SWAMP_WORLD.poisonY) : [];
     const roomAt = (x: number, y: number) => rooms.find((room) => x >= room.x && x < room.x + roomW && y >= room.y && y < room.y + roomH)?.id;
     const initialMapRoom = roomAt(player.x + player.w / 2, player.y + player.h / 2) ?? startRoomId;
     const visitedMapRooms = new Set<number>([initialMapRoom]);
@@ -1060,7 +1158,9 @@ export default function App() {
       const line = BOSS_DEATH_LINES[enemy.variant] ?? `${enemy.name} повержен, но проклятие всё ещё живо…`;
       bossDeathLineOpen.current = true; pausedRef.current = true; setStoryMessage(`«${line}»`);
       window.setTimeout(() => {
-        bossDeathLineOpen.current = false; setStoryMessage(''); offerBossRelic();
+        bossDeathLineOpen.current = false; setStoryMessage('');
+        if (currentTrial) { bossTrialRef.current = null; setBossTrial(null); setStarted(false); setMainMenuScreen('trials'); pausedRef.current = false; setPaused(false); }
+        else offerBossRelic();
       }, 3200);
     };
     const clampCamera = (value: number, worldSize: number, viewportSize: number) => Math.max(0, Math.min(value, Math.max(0, worldSize - viewportSize)));
@@ -1071,6 +1171,7 @@ export default function App() {
       && enemy.y + enemy.h >= cameraY - margin
       && enemy.y <= cameraY + viewH + margin;
     let grenadeCd = 0, trapCd = 0, kills = 0, shards = runProgress.current.shards, last = performance.now(), gameTime = 0, hitstopUntil = 0, raf = 0, uiTimer = 0, shake = 0, flash = 0, spikeFade = 0, spikeCooldown = 0, poisonTick = 0, hazardRecovery = 0, hazardTeleported = false, safeGroundTime = 0, activeDoor: Door | null = null, stageTwoArenaLocked = throneScene, stageFourArenaLocked = cryptLayout || bridgeLayout, finaleSequence = 0, finaleTimer = 0, finaleBeat = 0, throneGateOpen = false, throneGateNotice = false, servantX = startRoom.x + 70;
+    let combo = EMPTY_COMBO, vampireHitCount = 0;
     const torches = Array.from({ length: 42 }, (_, i) => ({ x: 110 + i * 247 + Math.random() * 90, y: 145 + Math.random() * (worldH - 260), phase: Math.random() * Math.PI * 2 }));
     const chains = [...terrain, ...oneWays].filter(() => Math.random() > .72).map((tile) => ({ x: tile.x + 22 + Math.random() * Math.max(10, tile.w - 44), y: tile.y + tile.h, length: 45 + Math.random() * 105 }));
     for (const room of rooms) if (room.connections.has(room.id + ROOM_COLS)) chains.push({ x: room.x + roomW / 2, y: room.y + roomH - wall - 300, length: 345 });
@@ -1167,7 +1268,7 @@ export default function App() {
       const originY = player.y + player.h - 5;
       for (let i = 0; i < 14; i++) {
         const life = .22 + Math.random() * .18;
-        particles.push({ x: originX, y: originY - Math.random() * 10, vx: -direction * (90 + Math.random() * 230), vy: -35 - Math.random() * 125, life, maxLife: life, color: i % 3 ? '#e5e7eb' : '#ffffff', size: 5 + Math.random() * 9, shape: 'smoke' });
+        particles.push({ x: originX, y: originY - Math.random() * 10, vx: -direction * (90 + Math.random() * 230), vy: -35 - Math.random() * 125, life, maxLife: life, color: i % 3 ? cosmetic.trail : '#ffffff', size: 5 + Math.random() * 9, shape: 'smoke' });
       }
       for (let i = 0; i < 10; i++) {
         const life = .18 + Math.random() * .16;
@@ -1209,25 +1310,52 @@ export default function App() {
       const dx = enemy.x + enemy.w / 2 - (totem.x + totem.w / 2), dy = enemy.y + enemy.h / 2 - (totem.y + totem.h / 2);
       return totem.variant === 'swampTotem' && dx * dx + dy * dy <= 150 * 150;
     });
+    const statusConfig: Record<StatusKind, { duration: number; interval: number; color: string; symbol: string }> = {
+      burning: { duration: 4.5, interval: .7, color: '#fb6a32', symbol: '▲' },
+      poisoned: { duration: 6, interval: 1, color: '#a3e635', symbol: '●' },
+      electrified: { duration: 2.4, interval: .6, color: '#60e7ff', symbol: 'ϟ' },
+    };
+    const applyStatus = (target: { statuses?: StatusState }, kind: StatusKind, stacks = 1) => {
+      const current = target.statuses?.[kind], config = statusConfig[kind];
+      target.statuses ??= {};
+      target.statuses[kind] = { life: Math.max(current?.life ?? 0, config.duration), tick: Math.min(current?.tick ?? config.interval, config.interval), stacks: Math.min(3, (current?.stacks ?? 0) + stacks), maskProgress: current?.maskProgress ?? 0 };
+    };
     const damageEnemy = (enemy: Enemy, damage: number, direction: number, sourceX: number, grantsSoul = false, bypassGuard = false) => {
       if (enemy.dead || enemy.dormant || enemy.hurt > 0) return;
+      const wasFrozen = (enemy.frozen ?? 0) > 0;
       enemy.frozen = 0;
       if (protectedByTotem(enemy)) { enemy.blocked = .22; shake = 2; burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#67e8f9', 7); return; }
       const sourceInFront = enemy.facing > 0 ? sourceX > enemy.x + enemy.w / 2 : sourceX < enemy.x + enemy.w / 2;
       if (enemy.kind === 'shield' && enemy.stunned <= 0 && sourceInFront && !bypassGuard) { enemy.blocked = .22; shake = 2; burst(enemy.x + enemy.w / 2 + enemy.facing * 18, enemy.y + 22, '#fde68a', 5); return; }
       if (enemy.variant === 'royalGuard' && sourceInFront && !bypassGuard) { damage *= .5; enemy.guardTriggered = true; }
       const berserkerBonus = runProgress.current.relics.includes('berserker_sigil') && player.hp <= player.maxHp / 2 ? 1.35 : 1;
-      enemy.hp -= damage * runProgress.current.damage * berserkerBonus; enemy.hurt = .16; enemy.x += direction * 18; enemy.stunned = Math.max(enemy.stunned, .08); shake = Math.max(shake, damage >= 35 ? 8 : 5);
-      burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fff7c2', 5); burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fbbf24', 11);
+      enemy.hp -= damage * runProgress.current.damage * berserkerBonus * eliteDamageMultiplier(enemy.elite); enemy.hurt = .16; enemy.x += direction * 18; enemy.stunned = Math.max(enemy.stunned, .08); shake = Math.max(shake, damage >= 35 ? 8 : 5);
+      if ((enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.phaseTwo && enemy.hp > 0 && enemy.hp <= enemy.maxHp * .5) {
+        enemy.phaseTwo = true; enemy.phaseTransition = 1.35; enemy.cooldown = 0; enemy.attack = 0; enemy.stunned = 1.05;
+        flash = .42; shake = 22; burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#fb7185', 52);
+        setStoryMessage(`ВТОРАЯ ФАЗА — ${enemy.name}`);
+        window.setTimeout(() => setStoryMessage(''), 1500);
+      }
+      playCombatHit(settingsRef.current.effectsVolume, damage >= 35 || enemy.kind === 'boss' || enemy.kind === 'rightHand');
+      hitstopUntil = Math.max(hitstopUntil, performance.now() + (damage >= 35 ? 48 : 28));
+      combo = comboForHits(combo.hits + 1, performance.now());
+      setCombatCombo(combo);
+      if (runProgress.current.relics.includes('vampire_fang')) {
+        vampireHitCount++;
+        if (vampireHitCount % 10 === 0 && player.hp < player.maxHp) { player.hp++; runProgress.current.hp = player.hp; burst(player.x + player.w / 2, player.y + 20, '#fb7185', 20); }
+      }
+      burst(enemy.x + enemy.w / 2, enemy.y + 18, '#ffffff', 9); burst(enemy.x + enemy.w / 2, enemy.y + 18, '#fbbf24', 18);
       if (grantsSoul) { player.soul = Math.min(100, player.soul + (runProgress.current.relics.includes('soul_lantern') ? 16.5 : 11)); setSoulHud(player.soul); if (player.soul >= 100) unlockAchievement('full_tank'); }
       if (enemy.hp <= 0) {
         if (enemy.kind === 'rightHand' && !enemy.defeated) {
           enemy.hp = 0; enemy.defeated = true; enemy.vx = 0; enemy.attack = 0; setStoryMessage('«Ты всё так же хорош, как всегда...»');
+          hitstopUntil = performance.now() + 380; flash = .28;
           window.setTimeout(() => {
             enemy.dead = true; stageTwoArenaLocked = false; throneGateOpen = true; setStoryMessage('');
             runStats.current.bossesDefeated++;
             setBestiaryProgress(recordBestiaryKill(enemy.variant));
             shake = 18;
+            if (currentTrial) { const reward = recordBossTrialClear(currentTrial, runElapsed.current); setBossTrialProgress(reward.progress); setTrialRewardMessage(`Победа! Получено печатей: +${reward.earned}`); bossTrialRef.current = null; setBossTrial(null); setStarted(false); setMainMenuScreen('trials'); pausedRef.current = false; setPaused(false); return; }
             if (throneArenaGate) shatterStoneWall(throneArenaGate);
             shatterStoneWall(throneGate);
             for (const gate of stageTwoArenaGates) { const solidIndex = solids.indexOf(gate); if (solidIndex >= 0) solids.splice(solidIndex, 1); const blockerIndex = projectileBlockers.indexOf(gate); if (blockerIndex >= 0) projectileBlockers.splice(blockerIndex, 1); }
@@ -1242,7 +1370,11 @@ export default function App() {
         enemy.dead = true; kills++;
         runStats.current.kills++;
         setBestiaryProgress(recordBestiaryKill(enemy.variant));
-        if (defeatedBoss) { runStats.current.bossesDefeated++; showBossDeathLine(enemy); }
+        if (defeatedBoss) { runStats.current.bossesDefeated++; hitstopUntil = performance.now() + 380; flash = .28; showBossDeathLine(enemy); }
+        if (defeatedBoss && currentTrial) {
+          const reward = recordBossTrialClear(currentTrial, runElapsed.current); setBossTrialProgress(reward.progress); setTrialRewardMessage(`Победа! Получено печатей: +${reward.earned}`);
+          window.setTimeout(() => { bossTrialRef.current = null; setBossTrial(null); setStarted(false); setMainMenuScreen('trials'); pausedRef.current = false; setPaused(false); }, 900);
+        }
         if (runProgress.current.relics.includes('blood_charm') && runStats.current.kills % 8 === 0 && player.hp < player.maxHp) {
           player.hp++; runProgress.current.hp = player.hp; burst(player.x + player.w / 2, player.y + 20, '#fb7185', 18);
         }
@@ -1255,19 +1387,35 @@ export default function App() {
         }
         const killTime = performance.now(); recentKillTimes.push(killTime); while (recentKillTimes.length && killTime - recentKillTimes[0] > 5000) recentKillTimes.shift();
         if (recentKillTimes.length >= 3) unlockAchievement('steel_whirl');
+        if (combo.rank === 'S' && runProgress.current.relics.includes('executioner_chain')) { combo = { ...combo, expiresAt: combo.expiresAt + 2500 }; setCombatCombo(combo); }
         const dropCount = runProgress.current.relics.includes('shard_heart') ? 6 : 3;
-        for (let drop = 0; drop < dropCount; drop++) shardDrops.push({ x: enemy.x + enemy.w / 2 - 4, y: enemy.y + enemy.h / 2, w: 9, h: 9, vx: (drop - (dropCount - 1) / 2) * 48, vy: -210 - Math.random() * 90, value: 1, life: 12 });
+        const comboReward = Math.max(1, Math.round(combo.multiplier));
+        for (let drop = 0; drop < dropCount; drop++) shardDrops.push({ x: enemy.x + enemy.w / 2 - 4, y: enemy.y + enemy.h / 2, w: 9, h: 9, vx: (drop - (dropCount - 1) / 2) * 48, vy: -210 - Math.random() * 90, value: comboReward, life: 12 });
         if (enemy.variant === 'marshSlime') hazards.push({ x: enemy.x - 18, y: enemy.y + enemy.h - 8, w: enemy.w + 36, h: 12, life: 3, tick: 0, kind: 'poison', delay: 1 });
+        if (enemy.elite === 'explosive') {
+          const blastX = enemy.x + enemy.w / 2, blastY = enemy.y + enemy.h / 2;
+          const dx = player.x + player.w / 2 - blastX, dy = player.y + player.h / 2 - blastY;
+          if (dx * dx + dy * dy < 145 * 145) damagePlayer(24, blastX, undefined, 1, true);
+          explosions.push({ x: blastX, y: blastY, life: .55, maxLife: .55, radius: 145, kind: 'fire' });
+          burst(blastX, blastY, '#fb923c', 34); shake = Math.max(shake, 14);
+        }
+        if (wasFrozen && runProgress.current.relics.includes('frost_shard')) {
+          const blastX = enemy.x + enemy.w / 2, blastY = enemy.y + enemy.h / 2;
+          explosions.push({ x: blastX, y: blastY, life: .5, maxLife: .5, radius: 125, kind: 'freeze' });
+          burst(blastX, blastY, '#a5f3fc', 30);
+          enemies.forEach((other) => { const dx = other.x + other.w / 2 - blastX, dy = other.y + other.h / 2 - blastY; if (!other.dead && dx * dx + dy * dy < 125 * 125) damageEnemy(other, 28, Math.sign(dx) || 1, blastX); });
+        }
         for (let i = 0; i < 12; i++) particles.push({ x: enemy.x + enemy.w / 2, y: enemy.y + enemy.h / 2, vx: (Math.random() - .5) * 210, vy: -70 - Math.random() * 150, life: .7 + Math.random() * .45, color: i % 2 ? '#ef445d' : '#4ea8de', size: 3 + Math.random() * 4 });
       }
     };
     const attackSword = (gear: Gear) => {
       if (player.attack > 0 || player.dead) return;
+      const counterReady = player.parry >= 100;
       player.attack = gear.cooldown;
       player.attackMax = gear.cooldown;
       player.attackFacing = player.facing;
-      const up = keys.has('KeyW');
-      const down = !player.grounded && (keys.has('KeyS') || keys.has('ArrowDown'));
+      const up = keys.has(settingsRef.current.bindings.up);
+      const down = !player.grounded && keys.has(settingsRef.current.bindings.down);
       player.attackDirection = down ? 1 : up ? -1 : 0;
       const hit: Box = down
         ? { x: player.x - 12, y: player.y + player.h - 3, w: player.w + 24, h: 68 }
@@ -1275,7 +1423,8 @@ export default function App() {
         ? { x: player.x - 12, y: player.y - 65, w: player.w + 24, h: 68 }
         : { x: player.facing > 0 ? player.x + player.w : player.x - 62, y: player.y + 4, w: 62, h: 48 };
       let hitEnemy = false;
-      enemies.forEach((enemy) => { if (!enemy.dead && overlap(hit, enemy)) { hitEnemy = true; damageEnemy(enemy, gear.damage, up || down ? Math.sign(enemy.x - player.x) || player.facing : player.facing, player.x + player.w / 2, true); } });
+      enemies.forEach((enemy) => { if (!enemy.dead && overlap(hit, enemy)) { hitEnemy = true; damageEnemy(enemy, gear.damage * (counterReady ? 3 : 1), up || down ? Math.sign(enemy.x - player.x) || player.facing : player.facing, player.x + player.w / 2, true, counterReady); } });
+      if (counterReady && hitEnemy) { player.parry = 0; shake = 12; flash = .12; burst(player.x + player.w / 2, player.y + 20, '#fde68a', 26); }
       if (down && hitEnemy) {
         player.vy = -DOWN_STRIKE_BOUNCE_SPEED; player.grounded = false; player.bounceLock = .5;
         burst(player.x + player.w / 2, player.y + player.h + 8, '#f8e9b0', 10);
@@ -1297,7 +1446,8 @@ export default function App() {
       if (player.bow > 0 || player.dead) return;
       player.bow = gear.cooldown;
       player.bowMax = gear.cooldown;
-      projectiles.push({ x: player.x + (player.facing > 0 ? 32 : -12), y: player.y + 22, w: 18, h: 4, vx: player.facing * 720, vy: 0, life: 1.5, damage: gear.damage, kind: 'arrow' });
+      const arrowX = player.x + (player.facing > 0 ? 32 : -12);
+      projectiles.push({ x: arrowX, y: player.y + 22, w: 18, h: 4, vx: player.facing * 720, vy: 0, life: 1.5, damage: gear.damage, kind: 'arrow', originX: arrowX });
     };
     const grenade = (gear: Gear, slot: number) => {
       if ((slot === 2 ? grenadeCd : trapCd) > 0 || player.dead) return;
@@ -1325,7 +1475,8 @@ export default function App() {
       const attackInFront = player.facing > 0 ? sourceX > player.x : sourceX < player.x + player.w;
       if (!ignoreGuard && player.guard > 0 && attackInFront) {
         if (player.guardAge <= .2) {
-          if (meleeAttacker) { meleeAttacker.stunned = 1.15; meleeAttacker.attack = 0; meleeAttacker.vx = 0; }
+          player.parry = Math.min(100, player.parry + (meleeAttacker ? 34 : 20));
+          if (meleeAttacker) { meleeAttacker.stunned = 1.15; meleeAttacker.attack = 0; meleeAttacker.vx = 0; if (meleeAttacker.variant === 'clockworkSoldier' || meleeAttacker.variant === 'gearFlyer') applyStatus(meleeAttacker, 'electrified', 2); }
           shake = 5; burst(player.x + player.w / 2 + player.facing * 20, player.y + 24, '#fff7ae', 14); return;
         }
         shake = 3; burst(player.x + player.w / 2 + player.facing * 18, player.y + 24, '#fde68a', 7);
@@ -1335,7 +1486,13 @@ export default function App() {
       const playerCenterX = player.x + player.w / 2;
       const knockbackDirection = playerCenterX < sourceX ? -1 : playerCenterX > sourceX ? 1 : -player.facing;
       player.hp = Math.max(0, player.hp - maskDamage); runProgress.current.hp = player.hp;
+      if (meleeAttacker?.elite === 'vampire' && !meleeAttacker.dead) {
+        const healing = Math.max(8, Math.round(meleeAttacker.maxHp * .18));
+        meleeAttacker.hp = Math.min(meleeAttacker.maxHp, meleeAttacker.hp + healing);
+        burst(meleeAttacker.x + meleeAttacker.w / 2, meleeAttacker.y + 12, '#fb7185', 12);
+      }
       runStats.current.damageTaken += maskDamage;
+      combo = EMPTY_COMBO; setCombatCombo(EMPTY_COMBO);
       player.hurt = PLAYER_HIT_INVULNERABILITY; player.controlLock = .15; player.vx = knockbackDirection * (meleeAttacker?.variant === 'bridgeKnight' ? 390 : 315); player.vy = -305; player.grounded = false;
       hitstopUntil = performance.now() + 50;
       setMaskHitPulse((value) => value + 1); playMaskCrack();
@@ -1351,6 +1508,45 @@ export default function App() {
           localStorage.removeItem('ashfall-autosave'); setAutosave(null);
         }
         burst(player.x + 17, player.y + 25, '#3f4145', 24); burst(player.x + 17, player.y + 25, '#a47b32', 14); burst(player.x + 17, player.y + 18, '#7f1d1d', 6); playArmorBreak();
+      }
+    };
+    const updateEnemyStatuses = (enemy: Enemy, dt: number) => {
+      for (const kind of Object.keys(enemy.statuses ?? {}) as StatusKind[]) {
+        const effect = enemy.statuses?.[kind]; if (!effect) continue;
+        effect.life -= dt; effect.tick -= dt;
+        if (kind === 'electrified') enemy.stunned = Math.max(enemy.stunned, .08);
+        if (effect.tick <= 0 && !enemy.dead) {
+          const damage = kind === 'burning' ? 5 : kind === 'poisoned' ? 4 : 3;
+          damageEnemy(enemy, damage * effect.stacks, 0, enemy.x + enemy.w / 2, false, true);
+          burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, statusConfig[kind].color, 5 + effect.stacks * 2);
+          if (kind === 'electrified') for (const other of enemies) {
+            if (other === enemy || other.dead) continue;
+            const dx = other.x - enemy.x, dy = other.y - enemy.y;
+            if (dx * dx + dy * dy < 105 * 105) applyStatus(other, 'electrified');
+          }
+          effect.tick = statusConfig[kind].interval;
+        }
+        if (effect.life <= 0) delete enemy.statuses?.[kind];
+      }
+    };
+    const updatePlayerStatuses = (dt: number) => {
+      for (const kind of Object.keys(player.statuses) as StatusKind[]) {
+        const effect = player.statuses[kind]; if (!effect) continue;
+        effect.life -= dt; effect.tick -= dt;
+        if (kind === 'electrified') player.controlLock = Math.max(player.controlLock, .08);
+        if (kind !== 'electrified') {
+          const maskRate = kind === 'burning' ? .18 : .14;
+          effect.maskProgress = (effect.maskProgress ?? 0) + dt * maskRate * (1 + (effect.stacks - 1) * .35);
+          if (effect.maskProgress >= 1 && !player.dead) {
+            effect.maskProgress -= 1;
+            damagePlayer(1, player.x + player.w / 2, undefined, 1, true, true);
+          }
+        }
+        if (effect.tick <= 0 && !player.dead) {
+          burst(player.x + player.w / 2, player.y + player.h / 2, statusConfig[kind].color, 9);
+          effect.tick = statusConfig[kind].interval;
+        }
+        if (effect.life <= 0) delete player.statuses[kind];
       }
     };
     const recoverFromHazard = (sourceX: number) => {
@@ -1420,13 +1616,13 @@ export default function App() {
         return;
       }
       if (pausedRef.current) return;
-      if (['ArrowLeft', 'ArrowRight', 'ArrowDown', 'Space', 'KeyQ', 'KeyF'].includes(e.code)) e.preventDefault();
+      if ([settingsRef.current.bindings.left, settingsRef.current.bindings.right, settingsRef.current.bindings.down, settingsRef.current.bindings.jump, settingsRef.current.bindings.heal].includes(e.code)) e.preventDefault();
       if (!keys.has(e.code)) pressed.add(e.code);
       keys.add(e.code);
-      const slotCodes = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
+      const slotCodes = [settingsRef.current.bindings.slot1, settingsRef.current.bindings.slot2, settingsRef.current.bindings.slot3, settingsRef.current.bindings.slot4];
       const slot = slotCodes.indexOf(e.code);
       if (slot >= 0) { selectedSlot.current = slot; setActiveSlot(slot); }
-      if (e.code === 'KeyJ') useSelectedGear();
+      if (e.code === settingsRef.current.bindings.attack) useSelectedGear();
       if (e.code === 'KeyR' && player.dead) reset();
     };
     const keyUp = (e: KeyboardEvent) => keys.delete(e.code);
@@ -1467,7 +1663,15 @@ export default function App() {
     const update = (dt: number) => {
       gameTime += dt;
       runElapsed.current += dt;
+      if (currentTrial?.timeLimit && runElapsed.current >= currentTrial.timeLimit && !player.dead) {
+        setStoryMessage('Время испытания истекло');
+        damagePlayer(player.maxHp, player.x, undefined, player.maxHp, true, true);
+      }
       if (runMode === 'timed' && runElapsed.current >= TIMED_RUN_SECONDS && !player.dead) damagePlayer(player.maxHp, player.x, undefined, player.maxHp, true, true);
+      if (runMode === 'timed') {
+        ghostSampleTimer -= dt;
+        if (ghostSampleTimer <= 0) { ghostRecording.push({ t: runElapsed.current, x: player.x, y: player.y, facing: player.facing, location }); ghostSampleTimer = .1; }
+      }
       if (debugCommands.current.addMask > 0) {
         debugCommands.current.addMask--; player.maxHp += 1; player.hp = player.maxHp; runProgress.current.maxHp = player.maxHp; runProgress.current.hp = player.hp;
       }
@@ -1512,12 +1716,12 @@ export default function App() {
         const throneBossAlive = enemies.some((enemy) => enemy.kind === 'rightHand' && !enemy.dead);
         const nearArmor = Math.abs(player.x + player.w / 2 - (royalArmor.x + royalArmor.w / 2)) < 72;
         const nearThrone = Math.abs(player.x + player.w / 2 - (throne.x + throne.w / 2)) < 82;
-        if (!throneBossAlive && !finaleSequence && nearArmor && tap('KeyE')) { setStoryMessage('Доспехи пусты... Царя здесь нет. Но почему они выглядят в точности как мои?'); window.setTimeout(() => setStoryMessage(''), 4200); }
+        if (!throneBossAlive && !finaleSequence && nearArmor && tap(settingsRef.current.bindings.interact)) { setStoryMessage('Доспехи пусты... Царя здесь нет. Но почему они выглядят в точности как мои?'); window.setTimeout(() => setStoryMessage(''), 4200); }
         const nearGate = player.x + player.w > throneGate.x - 34;
         if (!throneGateOpen && player.x + player.w > throneGate.x) { player.x = throneGate.x - player.w; player.vx = Math.min(0, player.vx); }
         if (!throneGateOpen && nearGate && !throneGateNotice) { throneGateNotice = true; setStoryMessage('Выход заблокирован. Трон ждет своего часа...'); window.setTimeout(() => setStoryMessage(''), 2600); }
         if (!nearGate) throneGateNotice = false;
-        if (!throneBossAlive && !finaleSequence && nearThrone && tap('KeyE')) { finaleSequence = 1; finaleTimer = 0; player.x = throne.x + throne.w / 2 - player.w / 2; player.y = throne.y + throne.h - player.h - 12; player.vx = 0; player.vy = 0; playHeartbeat(); }
+        if (!throneBossAlive && !finaleSequence && nearThrone && tap(settingsRef.current.bindings.interact)) { finaleSequence = 1; finaleTimer = 0; player.x = throne.x + throne.w / 2 - player.w / 2; player.y = throne.y + throne.h - player.h - 12; player.vx = 0; player.vy = 0; playHeartbeat(); }
         if (finaleSequence === 1) {
           finaleTimer += dt; player.vx = 0; player.vy = 0; keys.clear(); pressed.clear(); servantX = Math.min(throne.x - 65, servantX + dt * 260);
           const throneCameraX = Math.max(0, Math.min(throne.x + throne.w / 2 - viewW / 2, worldW - viewW));
@@ -1527,7 +1731,7 @@ export default function App() {
           if (finaleTimer > 2.6 && finaleBeat === 0) { finaleBeat = 1; setStoryMessage('Мой Король! Вы наконец-то вернулись!'); }
           if (finaleTimer > 5.1 && finaleBeat === 1) { finaleBeat = 2; setStoryMessage('Вас так долго не было... Мы думали, вы погибли! Где вы были всё это время?'); }
           if (finaleTimer > 7.4 && finaleBeat === 2) { finaleBeat = 3; throneGateOpen = true; setStoryMessage(''); }
-          if (finaleTimer > 9.2) { finaleSequence = 2; setStoryMessage(''); runProgress.current.shards = shards; setEnding(true); }
+          if (finaleTimer > 9.2) { finaleSequence = 2; setStoryMessage(''); runProgress.current.shards = shards; if (runMode === 'timed') saveBestRunGhost(runElapsed.current, ghostRecording); setEnding(true); }
           return;
         }
       }
@@ -1543,21 +1747,21 @@ export default function App() {
           keys.clear(); pressed.clear();
         }
       }
-      const focusKeyHeld = keys.has('KeyQ') || keys.has('KeyF');
+      const focusKeyHeld = keys.has(settingsRef.current.bindings.heal);
       if (!focusKeyHeld) player.focusBroken = false;
-      const wantsFocus = focusKeyHeld && !player.focusBroken && player.soul + .0001 >= SOUL_HEAL_COST && player.hp < player.maxHp;
+      const wantsFocus = currentTrial?.modifier !== 'noHealing' && focusKeyHeld && !player.focusBroken && player.soul + .0001 >= SOUL_HEAL_COST && player.hp < player.maxHp;
       if (wantsFocus) {
         player.focus += dt; player.vx *= Math.max(0, 1 - dt * 16); player.attack = 0; player.bow = 0;
         if (player.focus >= 1) { player.soul = Math.max(0, player.soul - SOUL_HEAL_COST); player.hp = Math.min(player.maxHp, player.hp + 1); runProgress.current.hp = player.hp; player.focus = 0; setSoulHud(player.soul); burst(player.x + player.w / 2, player.y + 20, '#e8fff8', 18); }
       } else player.focus = 0;
       const focusing = player.focus > 0;
       const controlsLocked = player.controlLock > 0;
-      const holdingShield = !controlsLocked && (mouseHeld || keys.has('KeyJ')) && runProgress.current.loadout[selectedSlot.current].kind === 'shield';
+      const holdingShield = !controlsLocked && (mouseHeld || keys.has(settingsRef.current.bindings.attack)) && runProgress.current.loadout[selectedSlot.current].kind === 'shield';
       if (holdingShield) { player.guard = 1; player.guardAge += dt; player.vx *= Math.max(0, 1 - dt * 8); }
       else { player.guard = 0; player.guardAge = 0; }
-      const left = keys.has('ArrowLeft') || keys.has('KeyA'), right = keys.has('ArrowRight') || keys.has('KeyD');
+      const left = keys.has(settingsRef.current.bindings.left), right = keys.has(settingsRef.current.bindings.right);
       if (noClipModeRef.current) {
-        const up = keys.has('ArrowUp') || keys.has('KeyW'), down = keys.has('ArrowDown') || keys.has('KeyS');
+        const up = keys.has(settingsRef.current.bindings.up), down = keys.has(settingsRef.current.bindings.down);
         const horizontal = Number(right) - Number(left), vertical = Number(down) - Number(up), length = Math.max(1, Math.hypot(horizontal, vertical));
         player.vx = horizontal / length * 520; player.vy = vertical / length * 520;
         player.x = Math.max(0, Math.min(worldW - player.w, player.x + player.vx * dt)); player.y = Math.max(0, Math.min(worldH - player.h, player.y + player.vy * dt));
@@ -1567,30 +1771,30 @@ export default function App() {
         player.vx += (target - player.vx) * Math.min(1, dt * (player.grounded ? 15 : 7));
         if (left) player.facing = -1; if (right) player.facing = 1;
       }
-      if (!noClipModeRef.current && !focusing && !controlsLocked && tap('ShiftLeft', 'ShiftRight', 'KeyC') && player.rollCd <= 0) { player.roll = .3; player.rollCd = .65; player.vx = player.facing * 440; player.trailTimer = 0; shadowDashBurst(player.facing); }
-      if (!noClipModeRef.current && !focusing && !controlsLocked && tap('Space', 'ArrowUp')) {
-        if ((keys.has('ArrowDown') || keys.has('KeyS')) && player.grounded) { player.drop = .22; player.grounded = false; player.y += 5; }
+      if (!noClipModeRef.current && !focusing && !controlsLocked && tap(settingsRef.current.bindings.roll) && player.rollCd <= 0) { player.roll = .3; player.rollCd = .65; player.vx = player.facing * 440; player.trailTimer = 0; shadowDashBurst(player.facing); }
+      if (!noClipModeRef.current && !focusing && !controlsLocked && tap(settingsRef.current.bindings.jump)) {
+        if (keys.has(settingsRef.current.bindings.down) && player.grounded) { player.drop = .22; player.grounded = false; player.y += 5; }
         else if (player.grounded || player.jumps < 2) { player.vy = -PLAYER_JUMP_SPEED; player.jumps++; player.grounded = false; dustCloud(player.x + 17, player.y + 55, .65); }
       }
       const nearbyPrisonGate = prisonGates.find((gate) => !gate.opened
         && Math.abs(player.x + player.w / 2 - (gate.x + gate.w / 2)) < 76
         && player.y + player.h > gate.y - 20 && player.y < gate.y + gate.h + 20);
-      if (nearbyPrisonGate && tap('KeyE')) {
+      if (nearbyPrisonGate && tap(settingsRef.current.bindings.interact)) {
         nearbyPrisonGate.opened = true;
         const solidIndex = solids.indexOf(nearbyPrisonGate); if (solidIndex >= 0) solids.splice(solidIndex, 1);
         const blockerIndex = projectileBlockers.indexOf(nearbyPrisonGate); if (blockerIndex >= 0) projectileBlockers.splice(blockerIndex, 1);
-        pressed.delete('KeyE'); shake = Math.max(shake, 4);
+        pressed.delete(settingsRef.current.bindings.interact); shake = Math.max(shake, 4);
         burst(nearbyPrisonGate.x + nearbyPrisonGate.w / 2, nearbyPrisonGate.y + nearbyPrisonGate.h / 2, '#789b78', 12);
       }
       const nearbyCart = minesLevel?.carts.find((cart) => !cart.moving
         && Math.abs(player.x + player.w / 2 - (cart.x + cart.w / 2)) < 92
         && Math.abs(player.y + player.h - (cart.y + cart.h)) < 70);
-      if (nearbyCart && tap('KeyE')) {
-        nearbyCart.moving = true; nearbyCart.vx = player.facing * 620; pressed.delete('KeyE');
+      if (nearbyCart && tap(settingsRef.current.bindings.interact)) {
+        nearbyCart.moving = true; nearbyCart.vx = player.facing * 620; pressed.delete(settingsRef.current.bindings.interact);
         shake = Math.max(shake, 5); burst(nearbyCart.x + nearbyCart.w / 2, nearbyCart.y + nearbyCart.h, '#94a3b8', 10);
       }
       if (!noClipModeRef.current) {
-        const jumpHeld = keys.has('Space') || keys.has('ArrowUp');
+        const jumpHeld = keys.has(settingsRef.current.bindings.jump);
         if (bridgeLevel) {
           const windForce = bridgeWindAmount(gameTime, bridgeLevel.wind);
           player.vx += windForce * dt;
@@ -1647,7 +1851,7 @@ export default function App() {
         }
         if (swampLevel && overlap(player, swampLevel.poison)) {
           poisonTick -= dt;
-          if (poisonTick <= 0) { damagePlayer(1, player.x + player.w / 2, undefined, 1, true); poisonTick = .6; burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14); }
+          if (poisonTick <= 0) { applyStatus(player, 'poisoned'); poisonTick = .8; burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14); }
         } else poisonTick = 0;
         for (const platform of sinkingPlatforms) {
           const standing = player.grounded && player.x + player.w > platform.collider.x && player.x < platform.collider.x + platform.collider.w
@@ -1655,13 +1859,6 @@ export default function App() {
           const oldY = platform.collider.y;
           updateSinkingPlatform(platform, standing, dt);
           if (standing) player.y += platform.collider.y - oldY;
-        }
-        for (const bubble of gasBubbles) {
-          updateGasBubble(bubble, dt);
-          if (bubble.state === 'rising' && overlap(player, bubble)) {
-            bubble.state = 'burst'; bubble.timer = .3; bubble.x -= 24; bubble.y -= 24; bubble.w = 78; bubble.h = 78;
-            damagePlayer(1, bubble.x + bubble.w / 2, undefined, 1, true); shake = Math.max(shake, 8); burst(bubble.x + bubble.w / 2, bubble.y + bubble.h / 2, '#bef264', 24);
-          }
         }
       }
       const standingSafely = hazardRecovery <= 0 && player.grounded && player.y >= 0 && player.y < worldH - player.h && !spikes.some((spike) => overlap({ x: player.x - 12, y: player.y, w: player.w + 24, h: player.h + 8 }, spike)) && !(swampLevel && overlap(player, swampLevel.poison));
@@ -1674,7 +1871,7 @@ export default function App() {
         shake = Math.max(shake, 5);
       }
       const activePortals = teleportPortals.filter((portal) => portal.active);
-      if (nearbyPortal?.active && activePortals.length > 1 && tap('KeyE')) {
+      if (nearbyPortal?.active && activePortals.length > 1 && tap(settingsRef.current.bindings.interact)) {
         const currentIndex = activePortals.indexOf(nearbyPortal);
         const destination = activePortals[(currentIndex + 1) % activePortals.length];
         burst(player.x + player.w / 2, player.y + player.h / 2, '#67e8f9', 20);
@@ -1683,21 +1880,21 @@ export default function App() {
         checkpoint.x = player.x; checkpoint.y = player.y; safeGroundTime = 0;
         camera = clampCamera(player.x + player.w / 2 - viewW / 2, worldW, viewW);
         cameraY = clampCamera(player.y + player.h / 2 - viewH / 2, worldH, viewH);
-        pressed.delete('KeyE'); burst(destination.x, destination.y - 34, '#a5f3fc', 28); shake = 7;
+        pressed.delete(settingsRef.current.bindings.interact); burst(destination.x, destination.y - 34, '#a5f3fc', 28); shake = 7;
       }
       const playerCenterForAction = player.x + player.w / 2;
       const nearbyDoorForAction = doors.find((door) => Math.abs(playerCenterForAction - (door.x + door.w / 2)) < 72 && Math.abs(player.y + player.h - (door.y + door.h)) < 30);
       // Doors lead to another location, so they must win when their interaction
       // area overlaps a palace mirror.
       const nearbyMirror = nearbyDoorForAction ? undefined : castleMirrors.find((mirror) => Math.abs(playerCenterForAction - (mirror.x + mirror.w / 2)) < 74 && Math.abs(player.y + player.h - (mirror.y + mirror.h)) < 80);
-      if (nearbyMirror && tap('KeyE')) {
+      if (nearbyMirror && tap(settingsRef.current.bindings.interact)) {
         const destination = castleMirrors.find((mirror) => mirror !== nearbyMirror && mirror.pairId === nearbyMirror.pairId);
         if (destination) {
           burst(player.x + player.w / 2, player.y + player.h / 2, '#a78bfa', 24);
           player.x = destination.x + destination.w / 2 - player.w / 2; player.y = destination.y + destination.h - player.h;
           player.vx = 0; player.vy = 0; player.controlLock = .15; checkpoint.x = player.x; checkpoint.y = player.y;
           camera = clampCamera(player.x + player.w / 2 - viewW / 2, worldW, viewW); cameraY = clampCamera(player.y + player.h / 2 - viewH / 2, worldH, viewH);
-          pressed.delete('KeyE'); burst(destination.x + destination.w / 2, destination.y + destination.h / 2, '#67e8f9', 28); shake = 8;
+          pressed.delete(settingsRef.current.bindings.interact); burst(destination.x + destination.w / 2, destination.y + destination.h / 2, '#67e8f9', 28); shake = 8;
         }
       }
       const shadowDashActive = player.roll > .1;
@@ -1716,16 +1913,16 @@ export default function App() {
 
       for (const item of loot) if (!item.collected) {
         const nearLoot = Math.abs(player.x + player.w / 2 - (item.x + item.w / 2)) < 68 && Math.abs(player.y + player.h / 2 - (item.y + item.h / 2)) < 72;
-        if (!nearLoot || !tap('KeyE')) continue;
+        if (!nearLoot || !tap(settingsRef.current.bindings.interact)) continue;
         const gear = item.gear;
-        equipOrChooseSlot(gear); shards += item.shardValue; runProgress.current.shards = shards; item.collected = true; pressed.delete('KeyE'); burst(item.x + 13, item.y + 13, '#f8fafc', 20);
+        equipOrChooseSlot(gear); shards += item.shardValue; runProgress.current.shards = shards; item.collected = true; pressed.delete(settingsRef.current.bindings.interact); burst(item.x + 13, item.y + 13, '#f8fafc', 20);
       }
       for (const reward of explorationRewards) if (!reward.collected) {
         const nearReward = Math.abs(player.x + player.w / 2 - (reward.x + reward.w / 2)) < 76
           && Math.abs(player.y + player.h / 2 - (reward.y + reward.h / 2)) < 84;
-        if (!nearReward || !tap('KeyE')) continue;
+        if (!nearReward || !tap(settingsRef.current.bindings.interact)) continue;
         reward.collected = true;
-        pressed.delete('KeyE');
+        pressed.delete(settingsRef.current.bindings.interact);
         if (reward.kind === 'goldChest') {
           for (let drop = 0; drop < 12; drop += 1) shardDrops.push({
             x: reward.x + reward.w / 2,
@@ -1753,17 +1950,98 @@ export default function App() {
         window.setTimeout(() => setStoryMessage(''), reward.lore ? 4800 : 1800);
         burst(reward.x + reward.w / 2, reward.y + reward.h / 2, reward.kind === 'goldChest' ? '#fbbf24' : '#a78bfa', 28);
       }
+      for (const event of roomEvents) if (!event.resolved) {
+        if (event.kind === 'parkour' && event.active) {
+          event.timer = (event.timer ?? 0) - dt;
+          const target = event.targetX !== undefined && event.targetY !== undefined
+            ? { x: event.targetX, y: event.targetY, w: 36, h: 48 }
+            : null;
+          if (target && overlap(player, target)) {
+            const reward = 24 + sector * 4;
+            shards += reward; runProgress.current.shards = shards; event.resolved = true;
+            setStoryMessage(`Испытание пройдено! Получено ${reward} осколков.`);
+            burst(target.x + 18, target.y + 24, '#22d3ee', 32);
+            window.setTimeout(() => setStoryMessage(''), 2600);
+            continue;
+          }
+          if ((event.timer ?? 0) <= 0) {
+            event.active = false;
+            setStoryMessage('Время вышло. Маяк погас — попробуй снова.');
+            window.setTimeout(() => setStoryMessage(''), 2400);
+          }
+        }
+        const nearEvent = Math.abs(player.x + player.w / 2 - (event.x + event.w / 2)) < 78
+          && Math.abs(player.y + player.h / 2 - (event.y + event.h / 2)) < 88;
+        if (event.kind === 'leverPuzzle' && nearEvent) {
+          const directions = ['left', 'up', 'right'] as const;
+          const input = directions.find((direction) => tap(settingsRef.current.bindings[direction]));
+          if (input) {
+            pressed.delete(settingsRef.current.bindings[input]);
+            const expected = event.sequence?.[event.sequenceProgress ?? 0];
+            event.sequenceProgress = input === expected ? (event.sequenceProgress ?? 0) + 1 : 0;
+            if ((event.sequenceProgress ?? 0) >= (event.sequence?.length ?? 3)) {
+              const reward = 30 + sector * 5;
+              shards += reward; runProgress.current.shards = shards; event.resolved = true;
+              setStoryMessage(`Механизм открыт! В тайнике ${reward} осколков.`);
+              burst(event.x + event.w / 2, event.y + 20, '#a78bfa', 30);
+              window.setTimeout(() => setStoryMessage(''), 2800);
+            } else if (input !== expected) {
+              setStoryMessage('Неверная последовательность — рычаги сброшены.');
+              window.setTimeout(() => setStoryMessage(''), 1800);
+            }
+          }
+          continue;
+        }
+        const choseFountainShards = event.kind === 'fountain' && nearEvent && tap(settingsRef.current.bindings.attack);
+        if (!nearEvent || (!tap(settingsRef.current.bindings.interact) && !choseFountainShards)) continue;
+        pressed.delete(settingsRef.current.bindings.interact); pressed.delete(settingsRef.current.bindings.attack);
+        if (event.kind === 'cursedChest') {
+          if (player.hp <= 1) { setStoryMessage('Алтарь требует хотя бы одну маску в жертву.'); continue; }
+          player.hp -= 1; runProgress.current.hp = player.hp;
+          const choices = chooseRelics(runProgress.current.relics, 1);
+          if (choices[0]) { runProgress.current.relics.push(choices[0].id); setStoryMessage(`Проклятая сделка: -1 маска, получена реликвия «${choices[0].name}».`); }
+          else { shards += 40; runProgress.current.shards = shards; setStoryMessage('Алтарь отдаёт 40 осколков: все реликвии уже собраны.'); }
+        } else if (event.kind === 'fountain') {
+          if (choseFountainShards) {
+            const reward = 18 + sector * 3; shards += reward; runProgress.current.shards = shards;
+            setStoryMessage(`Вода превращается в ${reward} осколков.`);
+          } else {
+            const wasWounded = player.hp < player.maxHp;
+            if (wasWounded) player.hp = player.maxHp; else { player.maxHp += 1; player.hp += 1; }
+            runProgress.current.hp = player.hp; runProgress.current.maxHp = player.maxHp;
+            setStoryMessage(wasWounded ? 'Фонтан полностью исцеляет тебя.' : 'Благословение фонтана добавляет 1 маску здоровья.');
+          }
+        } else if (event.kind === 'parkour') {
+          if (event.targetX === undefined || event.targetY === undefined) continue;
+          event.active = true; event.timer = 12;
+          setStoryMessage('Испытание началось: доберись до голубого маяка за 12 секунд!');
+          window.setTimeout(() => setStoryMessage(''), 2600);
+          continue;
+        } else {
+          const cost = 15 + sector * 2;
+          if (shards < cost || player.hp >= player.maxHp) { setStoryMessage(player.hp >= player.maxHp ? 'Странник: «Ты и так цел. Возвращайся после боя».' : `Странник просит ${cost} осколков за лечение.`); continue; }
+          shards -= cost; player.hp = player.maxHp; runProgress.current.shards = shards; runProgress.current.hp = player.hp;
+          setStoryMessage(`Странник полностью исцеляет тебя за ${cost} осколков.`);
+        }
+        event.resolved = true; burst(event.x + event.w / 2, event.y + 20, event.kind === 'cursedChest' ? '#c084fc' : '#fbbf24', 28);
+        window.setTimeout(() => setStoryMessage(''), 3200);
+      }
       for (const powerUp of powerUps) if (!powerUp.collected && overlap(player, powerUp)) {
         powerUp.collected = true;
         player.hp = Math.min(player.maxHp, player.hp + 1);
         runProgress.current.hp = player.hp; burst(powerUp.x + 12, powerUp.y + 12, '#fb7185', 18);
       }
 
+      updatePlayerStatuses(dt);
+
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant) {
+        if (enemy.phaseTransition !== undefined) enemy.phaseTransition = Math.max(0, enemy.phaseTransition - dt);
         // Enemies remain spawned across the whole map, but their AI and timers sleep
         // until they enter the expanded camera area.
         if (!enemyNearViewport(enemy)) continue;
         enemy.hurt -= dt; enemy.cooldown -= dt; enemy.blocked -= dt; enemy.stunned -= dt; enemy.frozen = (enemy.frozen ?? 0) - dt;
+        updateEnemyStatuses(enemy, dt);
+        if (enemy.elite === 'teleporter') enemy.eliteCooldown = (enemy.eliteCooldown ?? 3) - dt;
         if (enemy.defeated) { enemy.vx = 0; continue; }
         const isBoss = enemy.kind === 'boss' || enemy.kind === 'rightHand';
         const contactHitboxScale = isBoss ? BOSS_CONTACT_HITBOX_SCALE : ENEMY_CONTACT_HITBOX_SCALE;
@@ -1784,6 +2062,14 @@ export default function App() {
         const horizontalGap = Math.max(0, Math.abs(dx) - (enemy.w + player.w) / 2);
         const sightRange = enemy.variant === 'rottenPrisoner' ? 150 : enemy.kind === 'crossbow' ? 280 : enemy.kind === 'boss' || enemy.kind === 'rightHand' ? 560 : enemy.kind === 'mage' ? 13 * 40 : enemy.kind === 'flyer' || enemy.kind === 'wraith' ? 5 * 40 : enemy.kind === 'zombie' ? 7 * 40 : enemy.kind === 'bomber' ? 6 * 40 : enemy.kind === 'totem' ? 260 : 5 * 40;
         const distanceToPlayer = Math.hypot(dx, dyToPlayer);
+        if (enemy.elite === 'teleporter' && (enemy.eliteCooldown ?? 1) <= 0 && distanceToPlayer < 520) {
+          const oldX = enemy.x, oldY = enemy.y;
+          const targetX = player.x + (Math.random() < .5 ? -1 : 1) * (100 + Math.random() * 90);
+          enemy.x = Math.max(enemy.left, Math.min(enemy.right - enemy.w, targetX));
+          if (enemy.kind === 'flyer' || enemy.kind === 'wraith') enemy.y = player.y - 35 + (Math.random() - .5) * 100;
+          enemy.facing = Math.sign(player.x - enemy.x) || enemy.facing; enemy.vx = 0; enemy.attack = 0; enemy.eliteCooldown = 3.4 + Math.random() * 1.8;
+          burst(oldX + enemy.w / 2, oldY + enemy.h / 2, '#c084fc', 16); burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#c084fc', 16);
+        }
         const canTargetAcrossLevels = ['bomber', 'mage', 'flyer', 'wraith', 'totem'].includes(enemy.kind);
         // Only solid terrain blocks aggro; one-way platforms intentionally do not participate in this LOS test.
         const seesPlayer = distanceToPlayer <= sightRange && (canTargetAcrossLevels || sameLevel) && hasLineOfSight(enemyCenter, enemyCenterY, playerCenter, playerCenterY);
@@ -1818,11 +2104,12 @@ export default function App() {
           if (detected && enemy.cooldown <= 0 && enemy.attack <= 0) {
             enemy.specialAttack = enemy.specialAttack === 1 ? 2 : 1;
             enemy.attack = enemy.specialAttack === 1 ? .8 : 1.05;
-            enemy.cooldown = enemy.specialAttack === 1 ? 2.35 : 2.8;
+            enemy.cooldown = (enemy.specialAttack === 1 ? 2.35 : 2.8) * (enemy.phaseTwo ? .62 : 1);
             enemy.vx = 0;
             if (enemy.specialAttack === 1) {
               const floorY = stageTwoBossRoom!.y + roomH - wall;
-              bossWarnings.push({ x: Math.max(stageTwoBossRoom!.x + wall + 8, Math.min(playerCenter - 28, stageTwoBossRoom!.x + roomW - wall - 64)), y: floorY - 10, w: 56, h: 10, delay: .8, life: .35, hit: false, kind: location === 'swamps' ? 'geyser' : 'spike' });
+              const warningCount = enemy.phaseTwo ? 3 : 1;
+              for (let warning = 0; warning < warningCount; warning++) bossWarnings.push({ x: Math.max(stageTwoBossRoom!.x + wall + 8, Math.min(playerCenter - 28 + (warning - 1) * 105, stageTwoBossRoom!.x + roomW - wall - 64)), y: floorY - 10, w: 56, h: 10, delay: .8 + warning * .12, life: .35, hit: false, kind: location === 'swamps' ? 'geyser' : 'spike' });
               shake = 7;
             }
           }
@@ -1833,24 +2120,24 @@ export default function App() {
         } else if (enemy.variant === 'cryptWarden' || enemy.variant === 'bridgeColossus') {
           enemy.facing = Math.sign(dx) || enemy.facing;
           if (enemy.cooldown <= 0 && enemy.attack <= 0) {
-            enemy.specialAttack = enemy.specialAttack === 1 ? 2 : 1; enemy.attack = 1.25; enemy.cooldown = 3.1; enemy.vx = 0;
+            enemy.specialAttack = enemy.specialAttack === 1 ? 2 : 1; enemy.attack = 1.25; enemy.cooldown = enemy.phaseTwo ? 1.75 : 3.1; enemy.vx = 0;
             if (enemy.specialAttack === 2 && enemy.variant === 'cryptWarden') {
-              for (let i = 0; i < 3; i++) projectiles.push({ x: enemyCenter - 9, y: enemy.y + 25, w: 18, h: 18, vx: enemy.facing * (80 + i * 75), vy: -430 - i * 45, life: 3, damage: 20, kind: 'wardenSkull', owner: enemy });
+              for (let i = 0; i < (enemy.phaseTwo ? 5 : 3); i++) projectiles.push({ x: enemyCenter - 9, y: enemy.y + 25, w: 18, h: 18, vx: enemy.facing * (80 + i * 75), vy: -430 - i * 45, life: 3, damage: 20, kind: 'wardenSkull', owner: enemy });
               shake = 9;
             }
             if (enemy.specialAttack === 2 && enemy.variant === 'bridgeColossus') {
-              for (let i = 0; i < 3; i++) rockWarnings.push({ x: arenaRoom.x + 150 + Math.random() * (roomW - 330), y: arenaRoom.y + roomH - wall - 12, w: 82, h: 12, life: .5, delay: i * .55 });
+              for (let i = 0; i < (enemy.phaseTwo ? 6 : 3); i++) rockWarnings.push({ x: arenaRoom.x + 150 + Math.random() * (roomW - 330), y: arenaRoom.y + roomH - wall - 12, w: 82, h: 12, life: .5, delay: i * (enemy.phaseTwo ? .28 : .55) });
               shake = 12;
             }
           }
           if (enemy.specialAttack === 1 && enemy.attack < .78 && enemy.attack > .18) {
             enemy.vx = enemy.facing * (enemy.variant === 'cryptWarden' ? 720 : 830); enemy.x += enemy.vx * dt;
             const attackBox: Box = enemy.variant === 'cryptWarden' ? { x: enemy.facing > 0 ? enemy.x : enemy.x - 185, y: enemy.y + 48, w: enemy.w + 185, h: 64 } : { x: enemy.x - 18, y: enemy.y - 12, w: enemy.w + 36, h: 62 };
-            if (overlap(attackBox, player) && (enemy.variant !== 'bridgeColossus' || !keys.has('KeyS'))) damagePlayer(28, enemyCenter, enemy);
+            if (overlap(attackBox, player) && (enemy.variant !== 'bridgeColossus' || !keys.has(settingsRef.current.bindings.down))) damagePlayer(28, enemyCenter, enemy);
           } else enemy.vx = 0;
         } else if (enemy.kind === 'boss' || enemy.kind === 'rightHand') {
           const reach = enemy.kind === 'rightHand' ? 105 : 88;
-          if (detected && Math.abs(dx) < reach && enemy.cooldown <= 0 && enemy.attack <= 0) { enemy.attack = .42; enemy.cooldown = enemy.kind === 'rightHand' ? .72 : 1; enemy.vx = 0; enemy.facing = Math.sign(dx) || enemy.facing; }
+          if (detected && Math.abs(dx) < reach && enemy.cooldown <= 0 && enemy.attack <= 0) { enemy.attack = enemy.phaseTwo ? .28 : .42; enemy.cooldown = (enemy.kind === 'rightHand' ? .72 : 1) * (enemy.phaseTwo ? .55 : 1); enemy.vx = 0; enemy.facing = Math.sign(dx) || enemy.facing; }
           if (wasAttacking && enemy.attack <= 0) {
             if (detected && Math.abs(dx) < reach + 18) damagePlayer(enemy.kind === 'rightHand' ? 30 : 23, enemyCenter, enemy);
           }
@@ -1910,13 +2197,13 @@ export default function App() {
         if (hitWorld && p.kind === 'enemyBomb') { p.x = previousX; p.y = previousY; p.vx *= .55; p.vy = -Math.abs(p.vy) * .38; }
         else if (hitWorld && p.kind === 'gear' && (p.bounces || 0) > 0) { p.x = previousX; p.y = previousY; p.bounces = (p.bounces || 0) - 1; p.vx *= -1; p.vy *= -1; }
         else if (hitWorld) p.life = 0;
-        if (!hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, e)) { damageEnemy(e, p.damage, Math.sign(p.vx), p.x); p.life = 0; }
-        if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'trapArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; }
+        if (!hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, e)) { const longShot = runProgress.current.relics.includes('hunter_eye') && Math.abs(p.x - (p.originX ?? p.x)) >= 360; damageEnemy(e, p.damage * (longShot ? 1.5 : 1), Math.sign(p.vx), p.x); applyStatus(e, 'poisoned'); p.life = 0; }
+        if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'trapArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) { damagePlayer(p.damage, p.x); if (p.kind === 'poisonBurst') applyStatus(player, 'poisoned'); else if (p.kind === 'gear') applyStatus(player, 'electrified'); } p.life = 0; }
         if (p.kind === 'magicOrb' && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; burst(p.x, p.y, '#c084fc', 12); }
         if ((p.kind === 'wardenSkull' || p.kind === 'fallingRock') && overlap(p, player)) { damagePlayer(p.damage, p.x, p.owner); p.life = 0; burst(p.x, p.y, p.kind === 'wardenSkull' ? '#c084fc' : '#9ca3af', 14); }
-        if (p.kind === 'enemyBomb' && p.reflected) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemy)) { const wasAlive = !enemy.dead; damageEnemy(enemy, 48, Math.sign(p.vx) || 1, p.x); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); p.life = 0; break; }
-        if ((p.kind === 'grenade' || p.kind === 'freeze') && p.life <= 0) { enemies.forEach((e) => { const dx = e.x - p.x, dy = e.y - p.y; if (dx * dx + dy * dy < 150 * 150) { damageEnemy(e, p.damage, Math.sign(dx) || 1, p.x); if (p.kind === 'freeze' && !e.dead) e.frozen = 1; } }); explosions.push({ x: p.x, y: p.y, life: .52, maxLife: .52, radius: 150, kind: p.kind === 'freeze' ? 'freeze' : 'fire' }); burst(p.x, p.y, p.kind === 'freeze' ? '#67e8f9' : '#f5b942', 28); shake = 14; }
-        if (p.kind === 'enemyBomb' && p.life <= 0) { const dx = player.x + player.w / 2 - p.x, dy = player.y + player.h / 2 - p.y; if (!p.reflected && dx * dx + dy * dy < 135 * 135) damagePlayer(p.damage, p.x); if (p.reflected) enemies.forEach((enemy) => { const ex = enemy.x + enemy.w / 2 - p.x, ey = enemy.y + enemy.h / 2 - p.y; if (!enemy.dead && ex * ex + ey * ey < 135 * 135) { const wasAlive = !enemy.dead; damageEnemy(enemy, 48, Math.sign(ex) || 1, p.x); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); } }); explosions.push({ x: p.x, y: p.y, life: .48, maxLife: .48, radius: 145, kind: 'fire' }); burst(p.x, p.y, '#ff7a45', 32); burst(p.x, p.y, '#fde68a', 18); shake = 14; }
+        if (p.kind === 'enemyBomb' && p.reflected) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemy)) { const wasAlive = !enemy.dead; damageEnemy(enemy, runProgress.current.relics.includes('mirror_shield') ? 144 : 48, Math.sign(p.vx) || 1, p.x); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); p.life = 0; break; }
+        if ((p.kind === 'grenade' || p.kind === 'freeze') && p.life <= 0) { enemies.forEach((e) => { const dx = e.x - p.x, dy = e.y - p.y; if (dx * dx + dy * dy < 150 * 150) { damageEnemy(e, p.damage, Math.sign(dx) || 1, p.x); if (p.kind === 'freeze' && !e.dead) e.frozen = 1; else if (!e.dead) applyStatus(e, 'burning', 2); } }); if (p.kind === 'grenade' && runProgress.current.relics.includes('powder_seal')) hazards.push({ x: p.x - 70, y: p.y - 18, w: 140, h: 36, life: 4, tick: 0, delay: 0, kind: 'fire' }); explosions.push({ x: p.x, y: p.y, life: .52, maxLife: .52, radius: 150, kind: p.kind === 'freeze' ? 'freeze' : 'fire' }); burst(p.x, p.y, p.kind === 'freeze' ? '#67e8f9' : '#f5b942', 28); shake = 14; }
+        if (p.kind === 'enemyBomb' && p.life <= 0) { const dx = player.x + player.w / 2 - p.x, dy = player.y + player.h / 2 - p.y; if (!p.reflected && dx * dx + dy * dy < 135 * 135) { damagePlayer(p.damage, p.x); applyStatus(player, 'burning', 2); } if (p.reflected) enemies.forEach((enemy) => { const ex = enemy.x + enemy.w / 2 - p.x, ey = enemy.y + enemy.h / 2 - p.y; if (!enemy.dead && ex * ex + ey * ey < 135 * 135) { const wasAlive = !enemy.dead; damageEnemy(enemy, runProgress.current.relics.includes('mirror_shield') ? 144 : 48, Math.sign(ex) || 1, p.x); applyStatus(enemy, 'burning', 2); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); } }); explosions.push({ x: p.x, y: p.y, life: .48, maxLife: .48, radius: 145, kind: 'fire' }); burst(p.x, p.y, '#ff7a45', 32); burst(p.x, p.y, '#fde68a', 18); shake = 14; }
       }
       for (const warning of rockWarnings) {
         if (warning.delay > 0) { warning.delay -= dt; continue; }
@@ -1932,7 +2219,8 @@ export default function App() {
       for (const hazard of hazards) {
         if (hazard.delay > 0) { hazard.delay -= dt; continue; }
         hazard.life -= dt; hazard.tick -= dt;
-        if (hazard.tick <= 0 && overlap(player, hazard)) { damagePlayer(1, hazard.x + hazard.w / 2); hazard.tick = .45; }
+        if (hazard.kind === 'poison' && hazard.tick <= 0 && overlap(player, hazard)) { applyStatus(player, 'poisoned'); hazard.tick = .8; }
+        if (hazard.kind === 'fire' && hazard.tick <= 0) { enemies.forEach((enemy) => { if (!enemy.dead && overlap(enemy, hazard)) damageEnemy(enemy, 8, Math.sign(enemy.x - hazard.x) || 1, hazard.x + hazard.w / 2); }); hazard.tick = .55; }
       }
       for (const shard of shardDrops) {
         shard.life -= dt; shard.vy += 620 * dt;
@@ -1976,7 +2264,7 @@ export default function App() {
       // Вход только по E: ArrowUp также отвечает за прыжок и раньше случайно
       // переключал локацию, когда игрок оказывался рядом с дверью.
       const bossGateLocked = enemies.some((enemy) => (enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.dead && !enemy.dormant);
-      if (!activeDoor && tap('KeyE')) {
+      if (!activeDoor && tap(settingsRef.current.bindings.interact)) {
         const playerCenter = player.x + player.w / 2;
         const nearbyDoor = nearbyDoorForAction;
         const dormantBoss = enemies.find((enemy) => (enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.dead && enemy.dormant);
@@ -2193,15 +2481,6 @@ export default function App() {
             if (platform.kind === 'swing') { ctx.strokeStyle = '#66543a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(platform.x + 12, platform.y); ctx.lineTo(platform.x + 12, platform.y - 175); ctx.moveTo(platform.x + platform.w - 12, platform.y); ctx.lineTo(platform.x + platform.w - 12, platform.y - 175); ctx.stroke(); }
           }
         }
-        for (const bubble of gasBubbles) {
-          if (bubble.state === 'waiting') continue;
-          const pulse = 1 + Math.sin(now * 9 + bubble.phase) * .12;
-          ctx.save(); ctx.translate(bubble.x + bubble.w / 2, bubble.y + bubble.h / 2); ctx.scale(pulse, pulse);
-          ctx.globalAlpha = bubble.state === 'burst' ? Math.max(0, bubble.timer / .3) * .55 : .72;
-          ctx.fillStyle = bubble.state === 'burst' ? '#d9f99d' : '#84cc16';
-          ctx.beginPath(); ctx.arc(0, 0, bubble.w / 2, 0, Math.PI * 2); ctx.fill();
-          ctx.strokeStyle = '#ecfccb'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore(); ctx.globalAlpha = 1;
-        }
       }
       for (const gate of prisonGates) if (!gate.opened) {
         ctx.fillStyle = '#11191d'; ctx.fillRect(gate.x, gate.y, gate.w, gate.h);
@@ -2289,6 +2568,27 @@ export default function App() {
           ctx.font = 'bold 9px ui-sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(3,7,12,.92)'; ctx.fillRect(centerX - 78, bobY - 27, 156, 18); ctx.fillStyle = '#ddd6fe'; ctx.fillText(label, centerX, bobY - 15); ctx.textAlign = 'start';
         }
       }
+      for (const event of roomEvents) if (!event.resolved) {
+        const centerX = event.x + event.w / 2, bobY = event.y + Math.sin(now * 2.5 + event.phase) * 3;
+        const color = event.kind === 'cursedChest' ? '#c084fc' : event.kind === 'fountain' ? '#67e8f9' : event.kind === 'parkour' ? '#22d3ee' : event.kind === 'leverPuzzle' ? '#a78bfa' : '#fbbf24';
+        ctx.shadowColor = color; ctx.shadowBlur = 18; ctx.fillStyle = '#15121c'; ctx.fillRect(event.x, bobY + 12, event.w, 42);
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(event.x, bobY + 12, event.w, 42); ctx.shadowBlur = 0;
+        ctx.fillStyle = color; ctx.font = 'bold 24px ui-sans-serif'; ctx.textAlign = 'center';
+        const eventSymbol = event.kind === 'cursedChest' ? '◆' : event.kind === 'fountain' ? '♒' : event.kind === 'parkour' ? '⚑' : event.kind === 'leverPuzzle' ? '⇆' : '⚖';
+        ctx.fillText(eventSymbol, centerX, bobY + 42);
+        if (event.kind === 'parkour' && event.active && event.targetX !== undefined && event.targetY !== undefined) {
+          const targetPulse = 1 + Math.sin(now * 7) * .12;
+          ctx.save(); ctx.translate(event.targetX + 18, event.targetY + 24); ctx.scale(targetPulse, targetPulse);
+          ctx.strokeStyle = '#22d3ee'; ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 18; ctx.lineWidth = 3; ctx.strokeRect(-18, -24, 36, 48); ctx.restore();
+          ctx.fillStyle = '#67e8f9'; ctx.font = 'bold 10px ui-sans-serif'; ctx.fillText(`${Math.max(0, event.timer ?? 0).toFixed(1)}с`, event.targetX + 18, event.targetY - 8);
+        }
+        if (Math.abs(player.x + player.w / 2 - centerX) < 105) {
+          const sequence = event.sequence?.map((direction, index) => index < (event.sequenceProgress ?? 0) ? '✓' : direction === 'left' ? '←' : direction === 'right' ? '→' : '↑').join(' ');
+          const label = event.kind === 'cursedChest' ? 'E · ОТДАТЬ 1 HP ЗА РЕЛИКВИЮ' : event.kind === 'fountain' ? 'E · ЗДОРОВЬЕ / АТАКА · ОСКОЛКИ' : event.kind === 'parkour' ? (event.active ? `ДОБЕРИСЬ ДО МАЯКА · ${(event.timer ?? 0).toFixed(1)}с` : 'E · НАЧАТЬ ИСПЫТАНИЕ') : event.kind === 'leverPuzzle' ? `РЫЧАГИ: ${sequence}` : 'E · ПОМОЩЬ СТРАННИКА';
+          ctx.fillStyle = 'rgba(3,7,12,.94)'; ctx.fillRect(centerX - 93, bobY - 15, 186, 19); ctx.fillStyle = color; ctx.font = 'bold 8px ui-sans-serif'; ctx.fillText(label, centerX, bobY - 2);
+        }
+        ctx.textAlign = 'start';
+      }
       for (const item of loot) if (!item.collected) {
         const iy = item.y + Math.sin(now * 2.6 + item.phase) * 4, skill = ['grenade', 'freeze', 'trap'].includes(item.gear.kind), color = item.gear.kind === 'freeze' ? '#67e8f9' : skill ? '#fb923c' : '#e9d5ff';
         ctx.shadowColor = color; ctx.shadowBlur = 13; ctx.fillStyle = '#24170d'; ctx.fillRect(item.x - 8, iy + 5, 42, 22); ctx.fillStyle = '#6b451f'; ctx.fillRect(item.x - 6, iy - 3, 38, 13); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(item.x - 8, iy + 5, 42, 22); ctx.strokeRect(item.x - 6, iy - 3, 38, 13); ctx.fillStyle = '#fbbf24'; ctx.fillRect(item.x + 10, iy + 7, 7, 9); ctx.shadowBlur = 0;
@@ -2340,16 +2640,24 @@ export default function App() {
         else { ctx.fillStyle = '#171b1d'; ctx.fillRect(gate.x, gate.y, gate.w, gate.h); ctx.strokeStyle = location === 'swamps' ? '#65a30d' : '#f59e0b'; ctx.lineWidth = 3; ctx.strokeRect(gate.x + 2, gate.y + 2, gate.w - 4, gate.h - 4); }
       }
       if (stageFourArenaLocked) for (const gate of arenaGates) { ctx.fillStyle = '#171b1d'; ctx.fillRect(gate.x, gate.y, gate.w, gate.h); ctx.strokeStyle = cryptLayout ? '#a855f7' : '#94a3b8'; ctx.lineWidth = 3; ctx.strokeRect(gate.x + 2, gate.y + 2, gate.w - 4, gate.h - 4); }
-      for (const hazard of hazards) { if (hazard.delay > 0) continue; ctx.globalAlpha = Math.min(.72, hazard.life); ctx.fillStyle = '#65a30d'; ctx.fillRect(hazard.x, hazard.y, hazard.w, hazard.h); ctx.fillStyle = '#bef264'; for (let x = hazard.x + 6; x < hazard.x + hazard.w; x += 16) ctx.fillRect(x, hazard.y - 3 - Math.sin(now * 8 + x) * 3, 5, 5); ctx.globalAlpha = 1; }
+      for (const hazard of hazards) { if (hazard.delay > 0) continue; const fire = hazard.kind === 'fire'; ctx.globalAlpha = Math.min(.72, hazard.life); ctx.fillStyle = fire ? '#b93818' : '#65a30d'; ctx.fillRect(hazard.x, hazard.y, hazard.w, hazard.h); ctx.fillStyle = fire ? '#ffb347' : '#bef264'; for (let x = hazard.x + 6; x < hazard.x + hazard.w; x += 16) ctx.fillRect(x, hazard.y - 3 - Math.sin(now * 8 + x) * (fire ? 7 : 3), 5, fire ? 9 : 5); ctx.globalAlpha = 1; }
       for (const shard of shardDrops) { ctx.save(); ctx.translate(shard.x + 4, shard.y + 4); ctx.rotate(Math.PI / 4); ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 10; ctx.fillStyle = '#f59e0b'; ctx.fillRect(-5, -5, 10, 10); ctx.fillStyle = '#fef3c7'; ctx.fillRect(-2, -4, 3, 6); ctx.restore(); }
       const cryptHidden = location === 'crypt' && enemies.some((enemy) => !enemy.dead && enemy.variant === 'cryptTotem');
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant) {
         if (!enemyNearViewport(enemy, 80)) continue;
+        { const active = Object.keys(enemy.statuses ?? {}) as StatusKind[]; active.forEach((kind, index) => { const config = statusConfig[kind]; ctx.save(); ctx.fillStyle = config.color; ctx.shadowColor = config.color; ctx.shadowBlur = 7; ctx.font = 'bold 13px ui-sans-serif'; ctx.textAlign = 'center'; ctx.fillText(config.symbol, enemy.x + enemy.w / 2 + (index - (active.length - 1) / 2) * 13, enemy.y - 17); ctx.restore(); }); }
+        if (enemy.elite) {
+          const info = ELITE_INFO[enemy.elite], pulse = 1 + Math.sin(now * 5) * .08;
+          ctx.save(); ctx.strokeStyle = info.color; ctx.shadowColor = info.color; ctx.shadowBlur = 12; ctx.globalAlpha = .68;
+          ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, Math.max(enemy.w, enemy.h) * .7 * pulse, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalAlpha = 1; ctx.fillStyle = info.color; ctx.font = 'bold 13px ui-sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`${info.symbol} ${info.label}`, enemy.x + enemy.w / 2, enemy.y - 18); ctx.restore();
+        }
         if ((enemy.variant === 'cappedArcher' || enemy.variant === 'towerSniper') && enemy.attack > 0 && enemy.alertTimer <= 0) { const sniper = enemy.variant === 'towerSniper'; ctx.save(); ctx.globalAlpha = sniper ? .75 : .28 + (.8 - enemy.attack) * .35; ctx.strokeStyle = sniper ? '#59ff67' : '#ef4444'; ctx.shadowColor = sniper ? '#59ff67' : 'transparent'; ctx.shadowBlur = sniper ? 7 : 0; ctx.lineWidth = sniper ? 2 : 1; ctx.setLineDash(sniper ? [] : [7, 7]); ctx.beginPath(); ctx.moveTo(enemy.x + enemy.w / 2 + enemy.facing * 18, enemy.y + 16); ctx.lineTo(player.x + player.w / 2, player.y + player.h / 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore(); }
         if (enemy.alertTimer > 0) { const rise = Math.sin((.5 - enemy.alertTimer) / .5 * Math.PI) * 9; ctx.save(); ctx.translate(enemy.x + enemy.w / 2, enemy.y - 26 - rise); ctx.fillStyle = '#facc15'; ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 10; ctx.font = 'bold 25px monospace'; ctx.textAlign = 'center'; ctx.fillText('!', 0, 0); ctx.restore(); }
         if (enemy.kind === 'totem' && enemy.variant === 'swampTotem') { ctx.strokeStyle = 'rgba(163,230,53,.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, 150, 0, Math.PI * 2); ctx.stroke(); }
         if (protectedByTotem(enemy)) { ctx.strokeStyle = enemy.blocked > 0 ? '#e0f2fe' : 'rgba(103,232,249,.65)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, Math.max(enemy.w, enemy.h) * .72, 0, Math.PI * 2); ctx.stroke(); }
         if (enemy.stunned > 0) { ctx.fillStyle = '#fde68a'; const spin = Math.floor(now * 8) % 3; ctx.fillRect(enemy.x + 4 + spin * 9, enemy.y - 22, 5, 5); ctx.fillRect(enemy.x + enemy.w - 10 - spin * 5, enemy.y - 29, 4, 4); }
+        if (enemy.phaseTwo) { ctx.save(); ctx.strokeStyle = enemy.phaseTransition ? '#fff1f2' : '#fb7185'; ctx.shadowColor = '#fb7185'; ctx.shadowBlur = 18; ctx.globalAlpha = .45 + Math.sin(now * 8) * .15; ctx.lineWidth = enemy.phaseTransition ? 7 : 3; ctx.beginPath(); ctx.arc(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, Math.max(enemy.w, enemy.h) * (.66 + Math.sin(now * 5) * .04), 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
         ctx.save(); if (cryptHidden && enemy.variant !== 'cryptTotem') ctx.globalAlpha = .12; ctx.translate(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2); if (enemy.alertTimer > 0) ctx.scale(1.08, .92); if (enemy.facing < 0) ctx.scale(-1, 1); if (enemy.defeated) { ctx.translate(0, 17); ctx.scale(1, .62); }
         if (enemy.variant === 'cryptWarden' || enemy.variant === 'bridgeColossus') {
           const spriteSize = uniqueBossSpriteSizes[enemy.variant]; ctx.scale(enemy.w / spriteSize.w, enemy.h / spriteSize.h);
@@ -2413,6 +2721,11 @@ export default function App() {
         const core = Math.max(2, Math.round(34 * (1 - progress))); ctx.fillStyle = frozen ? '#cffafe' : '#fff7c2'; ctx.beginPath(); ctx.arc(explosion.x, explosion.y, core, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
       }
       for (const ghost of playerGhosts) drawShadowDashGhost(ctx, ghost, player.w, player.h, now);
+      if (bestGhost?.frames.length) {
+        const locationFrames = bestGhost.frames.filter((item) => item.location === location);
+        const frame = locationFrames.find((item) => item.t >= runElapsed.current) ?? locationFrames[locationFrames.length - 1];
+        if (frame) { ctx.save(); ctx.globalAlpha = .28; ctx.fillStyle = '#67e8f9'; ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 16; ctx.fillRect(frame.x, frame.y, player.w, player.h); ctx.fillStyle = '#e0f2fe'; ctx.fillRect(frame.x + (frame.facing > 0 ? 22 : 7), frame.y + 12, 5, 4); ctx.restore(); }
+      }
       for (const p of particles) {
         const alpha = p.maxLife ? Math.max(0, p.life / p.maxLife) : Math.min(1, p.life * 3);
         ctx.globalAlpha = alpha; ctx.fillStyle = p.color;
@@ -2425,6 +2738,13 @@ export default function App() {
         }
       }
       ctx.globalAlpha = 1;
+      { const active = Object.keys(player.statuses) as StatusKind[]; active.forEach((kind, index) => { const config = statusConfig[kind]; ctx.save(); ctx.fillStyle = config.color; ctx.shadowColor = config.color; ctx.shadowBlur = 8; ctx.font = 'bold 14px ui-sans-serif'; ctx.textAlign = 'center'; ctx.fillText(config.symbol, player.x + player.w / 2 + (index - (active.length - 1) / 2) * 14, player.y - 25); ctx.restore(); }); }
+      if (player.parry > 0) {
+        const barX = player.x - 8, barY = player.y - 18, barW = player.w + 16;
+        ctx.fillStyle = 'rgba(3,7,12,.85)'; ctx.fillRect(barX - 2, barY - 2, barW + 4, 8);
+        ctx.fillStyle = player.parry >= 100 ? '#fde68a' : '#38bdf8'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = player.parry >= 100 ? 12 : 4;
+        ctx.fillRect(barX, barY, barW * player.parry / 100, 4); ctx.shadowBlur = 0;
+      }
       if (player.focus > 0) { const pulse = 24 + player.focus * 22; ctx.strokeStyle = `rgba(220,255,247,${.25 + player.focus * .65})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x + player.w / 2, player.y + player.h / 2, pulse, 0, Math.PI * 2); ctx.stroke(); }
       ctx.save(); ctx.translate(player.x + player.w / 2, player.y + player.h);
       const idleBreath = player.grounded && Math.abs(player.vx) < 25 ? 1 + Math.sin(now * 3.2) * .025 : 1;
@@ -2440,17 +2760,17 @@ export default function App() {
         const damageBlink = player.hurt > 0 && Math.floor(player.hurt * 22) % 2 === 0;
         if (player.hurt > 0) ctx.globalAlpha = damageBlink ? .3 : 1;
         const knightPose = { time: now, speed: Math.abs(player.vx), grounded: player.grounded, rolling: player.roll > 0, damaged: damageBlink };
-        if (player.roll > 0) drawPlayerLungePose(ctx, now, damageBlink);
+        if (player.roll > 0) drawPlayerLungePose(ctx, now, damageBlink, cosmetic.cape, cosmetic.maskGlow);
         else {
-          drawPlayerCape(ctx, knightPose);
+          drawPlayerCape(ctx, knightPose, cosmetic.cape);
           drawWalkingLegs(ctx, { phase: now * Math.min(11, 3.5 + Math.abs(player.vx) * .025), moving: player.grounded && Math.abs(player.vx) > 25, legColor: '#34343f', bootColor: '#15151b', legWidth: 8, bootWidth: 9, bootHeight: 9 });
-          drawPlayerKnight(ctx, knightPose);
+          drawPlayerKnight(ctx, knightPose, cosmetic.maskGlow);
         }
         if (player.guard > 0) { const perfect = player.guardAge <= .2; ctx.shadowColor = perfect ? '#fff7ae' : '#facc15'; ctx.shadowBlur = perfect ? 16 : 5; ctx.fillStyle = perfect ? '#fff7ae' : '#facc15'; ctx.fillRect(15, -18, 12, 36); ctx.strokeStyle = '#fff1a8'; ctx.lineWidth = 2; ctx.strokeRect(15, -18, 12, 36); ctx.shadowBlur = 0; }
       }
       ctx.save();
       if (player.attack > 0 && player.attackFacing !== player.facing) ctx.scale(-1, 1);
-      drawPlayerSword(ctx, player.attack, player.attackMax, player.attackDirection);
+      drawPlayerSword(ctx, player.attack, player.attackMax, player.attackDirection, cosmetic.weapon);
       ctx.restore();
       drawPlayerBow(ctx, player.bow, player.bowMax);
       ctx.restore(); ctx.restore();
@@ -2459,9 +2779,14 @@ export default function App() {
       ctx.restore();
     };
 
-    const loop = (now: number) => { const rawDt = Math.min((now - last) / 1000, .05); last = now; if (!pausedRef.current && now >= hitstopUntil) update(Math.min(rawDt, .033)); drawCanvas(); pressed.clear(); raf = requestAnimationFrame(loop); };
+    const loop = (now: number) => {
+      const rawDt = Math.min((now - last) / 1000, .05); last = now;
+      if (!pausedRef.current && combo.hits > 0 && now >= combo.expiresAt) { combo = EMPTY_COMBO; setCombatCombo(EMPTY_COMBO); }
+      if (!pausedRef.current && now >= hitstopUntil) update(Math.min(rawDt, .033));
+      drawCanvas(); pressed.clear(); raf = requestAnimationFrame(loop);
+    };
     raf = requestAnimationFrame(loop);
-    return () => { saveMapSnapshot(); dropReplacedWeapon.current = () => {}; cancelAnimationFrame(raf); window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); window.removeEventListener('mouseup', mouseUp); canvas.removeEventListener('mousedown', mouseDown); };
+    return () => { saveMapSnapshot(); dropReplacedWeapon.current = () => {}; cancelAnimationFrame(raf); window.removeEventListener('resize', resizeCanvas); window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); window.removeEventListener('mouseup', mouseUp); canvas.removeEventListener('mousedown', mouseDown); };
   }, [started, runKey, sector, location, runMode]);
 
   const gearIcons: Record<GearKind, string> = { sword: '⚔', bow: '➶', shield: '⬟', grenade: '✹', freeze: '❄', trap: '⌁', empty: '·' };
@@ -2541,9 +2866,10 @@ export default function App() {
   const deleteSave = (slot: number) => { if (!window.confirm(`Стереть сохранение в слоте ${slot + 1}?`)) return; const nextSlots = [...saveSlots]; nextSlots[slot] = null; persistSaveSlots(nextSlots); if (activeSaveSlot === slot) setActiveSaveSlot(null); };
   const beginNewInSlot = (slot: number) => { setActiveSaveSlot(slot); setRunMode('normal'); setStartingWeapons(['sword', 'bow']); setChoosingMode(true); };
   const startNewGame = () => {
+    bossTrialRef.current = null; setBossTrial(null);
     localStorage.removeItem('ashfall-autosave'); setAutosave(null);
     setEnding(false); setStoryMessage(''); setRelicChoices([]); relicChoiceOpen.current = false;
-    runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 }; savedRecordForRun.current = false; runElapsed.current = 0; setElapsedHud(0); setDeathAdvice(''); setChronicle('');
+    runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 }; savedRecordForRun.current = false; runElapsed.current = 0; timedGhostFrames.current = []; setElapsedHud(0); setDeathAdvice(''); setChronicle('');
     runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0); setLocation('prison'); setSector(1);
     setMapArchive({}); mapOpenRef.current = false; setMapOpen(false);
     const chosen = startingWeapons.map((kind) => ({ ...BASIC_WEAPONS.find((gear) => gear.kind === kind)! }));
@@ -2552,10 +2878,23 @@ export default function App() {
     setHud({ hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
     pausedRef.current = false; setPaused(false); setChoosingLoadout(false); setChoosingMode(false); setRunKey((value) => value + 1); setStarted(true);
   };
+  const startBossTrial = (trial: BossTrial) => {
+    const progress = freshRun(permanentProgress.current);
+    const rewardTier = trialRewardTier(bossTrialProgress.seals);
+    if (rewardTier >= 1) progress.damage += .1;
+    if (rewardTier >= 2) { progress.maxHp += 1; progress.hp += 1; }
+    progress.loadout = [{ ...BASIC_WEAPONS[0], damage: 34, tier: 4 }, { ...BASIC_WEAPONS[2], damage: 25, tier: 4 }, { kind: 'grenade', name: 'Осколочная бомба', tier: 3, damage: 55, cooldown: 5 }, { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 }];
+    runProgress.current = progress; runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 };
+    bossTrialRef.current = trial; setBossTrial(trial); setTrialRewardMessage(''); runElapsed.current = 0; setElapsedHud(0); setLocation(trial.location); setSector(trial.location === 'throne' ? 6 : trial.location === 'crypt' || trial.location === 'bridge' ? 4 : 2);
+    setHud({ hp: progress.hp, maxHp: progress.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
+    selectedSlot.current = 0; setActiveSlot(0); pausedRef.current = false; setPaused(false); setStoryMessage(`${trial.boss}: ${trial.description}`); setRunKey((value) => value + 1); setStarted(true);
+    window.setTimeout(() => setStoryMessage(''), 3500);
+  };
   const toggleStartingWeapon = (kind: GearKind) => {
     setStartingWeapons((current) => current.includes(kind) ? current.filter((item) => item !== kind) : current.length < 2 ? [...current, kind] : current);
   };
   const loadGame = (save: SavedGame, slot?: number) => {
+    bossTrialRef.current = null; setBossTrial(null);
     runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 }; setRunMode(save.mode); runElapsed.current = save.elapsedSeconds; setElapsedHud(Math.floor(save.elapsedSeconds)); setDeathAdvice(''); setChronicle('');
     const migratedMaxHp = save.progress.maxHp > 20 ? 5 + permanentProgress.current.maxHpBonus : Math.max(1, Math.round(save.progress.maxHp));
     const migratedHp = save.progress.hp > 20 ? Math.max(1, Math.round(migratedMaxHp * Math.min(1, save.progress.hp / save.progress.maxHp))) : Math.min(migratedMaxHp, Math.max(0, Math.round(save.progress.hp)));
@@ -2614,12 +2953,13 @@ export default function App() {
         <svg className="dead-menu-clouds-svg dead-menu-clouds-near" viewBox="0 0 1400 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g className="cloud-bank cloud-bank-a"><circle cx="90" cy="390" r="80"/><circle cx="176" cy="350" r="118"/><circle cx="280" cy="386" r="91"/><circle cx="365" cy="409" r="59"/><path d="M15 425Q150 349 275 409T430 438Q340 474 65 466Z"/></g><g className="cloud-bank cloud-bank-c"><circle cx="940" cy="300" r="79"/><circle cx="1030" cy="253" r="126"/><circle cx="1145" cy="292" r="94"/><circle cx="1240" cy="325" r="64"/><path d="M850 346Q1000 260 1130 329T1325 360Q1210 401 902 389Z"/></g></svg><div className="dead-menu-grain"/>
         <header className="absolute inset-x-0 top-0 z-20 flex items-start justify-between p-6 md:p-10"><div><p className="text-[9px] font-black uppercase tracking-[.48em] text-cyan-200/70">Проклятое королевство</p><h1 className="mt-2 text-2xl font-black uppercase tracking-[.12em] text-slate-100 drop-shadow-[0_3px_8px_rgba(0,0,0,.8)] md:text-4xl">False Knight</h1></div><button onClick={() => session ? supabase.auth.signOut() : setShowAuth(true)} disabled={!authReady} className="dead-menu-account border border-white/15 bg-black/20 px-4 py-2 text-[9px] font-black uppercase tracking-[.18em] text-slate-300">{session ? 'Выйти' : 'Войти'}</button></header>
         <div className="absolute inset-0 z-10 flex items-center px-7 pb-8 pt-24 md:px-14 lg:px-24">
-          {mainMenuScreen === 'main' ? <section className="dead-menu-main w-full max-w-xl"><p className="mb-4 text-[10px] font-bold uppercase tracking-[.4em] text-orange-200/70">Память ждёт в стенах замка</p><nav className="grid justify-start gap-1"><button onClick={() => setMainMenuScreen('saves')} className="dead-menu-item">Играть</button><button onClick={() => setMainMenuScreen('records')} className="dead-menu-item">Таблица рекордов</button><button onClick={() => setMainMenuScreen('bestiary')} className="dead-menu-item">Книга врагов</button><button onClick={() => setMainMenuScreen('settings')} className="dead-menu-item">Настройки</button><button onClick={() => setMainMenuScreen('achievements')} className="dead-menu-item">Достижения</button></nav><p className="mt-6 max-w-sm border-l border-cyan-200/30 pl-4 text-[10px] leading-5 text-slate-300/55">Поднимись со дна Подземелья. Верни утраченную силу и узнай, кому принадлежит пустой трон.</p><DailyChallengeCard challenge={dailyChallenge} progress={dailyProgress(dailyChallenge, summarizeRun())} loading={dailyLoading} completed={dailyReward.completedDate === dailyChallenge.date} streak={dailyReward.streak}/></section> : <section className="dead-submenu w-full"><div className="mb-5 flex items-end justify-between border-b border-white/15 pb-4"><div><button onClick={() => setMainMenuScreen('main')} className="mb-3 text-[9px] font-black uppercase tracking-[.22em] text-cyan-200/70 hover:text-cyan-100">← Главное меню</button><h2 className="text-2xl font-black uppercase tracking-[.08em] md:text-4xl">{mainMenuScreen === 'saves' ? 'Выбор слота' : mainMenuScreen === 'settings' ? 'Настройки' : mainMenuScreen === 'bestiary' ? 'Книга врагов и боссов' : mainMenuScreen === 'records' ? 'Таблица рекордов' : 'Достижения'}</h2></div>{mainMenuScreen === 'achievements' && <b className="text-xs text-amber-200">{unlockedAchievements.size} / {ACHIEVEMENTS.length}</b>}</div>
+          {mainMenuScreen === 'main' ? <section className="dead-menu-main w-full max-w-xl"><p className="mb-4 text-[10px] font-bold uppercase tracking-[.4em] text-orange-200/70">Память ждёт в стенах замка</p><nav className="grid justify-start gap-1"><button onClick={() => setMainMenuScreen('saves')} className="dead-menu-item">Играть</button><button onClick={() => setMainMenuScreen('settings')} className="dead-menu-item">Настройки</button><button onClick={() => setMainMenuScreen('bestiary')} className="dead-menu-item">Книга врагов</button><button onClick={() => setMainMenuScreen('trials')} className="dead-menu-item">Испытания боссов</button><button onClick={() => setMainMenuScreen('records')} className="dead-menu-item">Таблица рекордов</button><button onClick={() => setMainMenuScreen('achievements')} className="dead-menu-item">Достижения</button></nav><p className="mt-6 max-w-sm border-l border-cyan-200/30 pl-4 text-[10px] leading-5 text-slate-300/55">Поднимись со дна Подземелья. Верни утраченную силу и узнай, кому принадлежит пустой трон.</p><DailyChallengeCard challenge={dailyChallenge} progress={dailyProgress(dailyChallenge, summarizeRun())} loading={dailyLoading} completed={dailyReward.completedDate === dailyChallenge.date} streak={dailyReward.streak}/></section> : <section className="dead-submenu w-full"><div className="mb-5 flex items-end justify-between border-b border-white/15 pb-4"><div><button onClick={() => setMainMenuScreen('main')} className="mb-3 text-[9px] font-black uppercase tracking-[.22em] text-cyan-200/70 hover:text-cyan-100">← Главное меню</button><h2 className="text-2xl font-black uppercase tracking-[.08em] md:text-4xl">{mainMenuScreen === 'saves' ? 'Выбор слота' : mainMenuScreen === 'settings' ? 'Настройки' : mainMenuScreen === 'bestiary' ? 'Книга врагов и боссов' : mainMenuScreen === 'records' ? 'Таблица рекордов' : mainMenuScreen === 'trials' ? 'Испытания боссов' : 'Достижения'}</h2></div>{mainMenuScreen === 'achievements' && <b className="text-xs text-amber-200">{unlockedAchievements.size} / {ACHIEVEMENTS.length}</b>}</div>
             {mainMenuScreen === 'saves' && <div className="dead-slots-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{saveSlots.map((save, index) => <article key={index} className="dead-slot relative min-h-52 border border-white/15 bg-[#07101a]/85 p-4 backdrop-blur-md"><p className="text-[8px] font-black uppercase tracking-[.25em] text-slate-500">Слот {index + 1}</p>{save ? <><button onClick={() => deleteSave(index)} title="Сбросить прогресс" className="absolute right-3 top-3 border border-rose-400/20 px-2 py-1 text-[8px] uppercase text-rose-300/70 hover:border-rose-300/60 hover:text-rose-200">☠ Сбросить прогресс</button><button onClick={() => loadGame(save, index)} className="dead-slot-button mt-11 w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Продолжить (Обычный режим)</button><p className="mt-5 border-t border-white/10 pt-4 text-[9px] leading-5 text-slate-400">Уровень: <b className="text-slate-100">{LOCATION_NAMES_RU[save.location]}</b><br/>Осколки: <b className="text-amber-200">{save.progress.shards ?? save.progress.cells ?? 0} 💎</b><br/>Здоровье: <b className="text-rose-200">{save.progress.hp}/5 🩸</b></p></> : <div className="grid h-40 place-items-center"><button onClick={() => beginNewInSlot(index)} className="dead-slot-button w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Новый забег (Обычный режим)</button></div>}</article>)}</div>}
-            {mainMenuScreen === 'settings' && <div className="dead-settings mx-auto grid max-w-4xl gap-5 rounded-sm border border-white/15 bg-[#07101a]/85 p-5 backdrop-blur-md md:grid-cols-2 md:p-7"><div className="grid content-start gap-5"><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-[10px] font-black uppercase tracking-[.15em] ${settings.screenShake ? 'border-cyan-300/50 bg-cyan-300/10 text-cyan-100' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Включена' : 'Выключена'}</span></button></div><div><p className="text-[9px] font-black uppercase tracking-[.25em] text-orange-200/70">Схема управления</p><div className="mt-3 grid grid-cols-2 gap-2">{[['WASD / стрелки','Движение'],['Пробел / ↑','Прыжок'],['S + прыжок','Спрыгнуть'],['ЛКМ / J','Атака'],['W + атака','Удар вверх'],['Q / F','Лечение'],['E','Действие'],['Shift / C','Перекат']].map(([key, action]) => <div key={key} className="border border-white/10 bg-black/25 p-3 text-[9px] text-slate-400"><kbd className="font-black text-slate-100">{key}</kbd><span className="mt-1 block">{action}</span></div>)}</div></div></div>}
+            {mainMenuScreen === 'settings' && <div className="dead-settings mx-auto grid max-w-4xl gap-5 rounded-sm border border-white/15 bg-[#07101a]/85 p-5 backdrop-blur-md md:grid-cols-2 md:p-7"><div className="grid content-start gap-5"><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-[10px] font-black uppercase tracking-[.15em] ${settings.screenShake ? 'border-cyan-300/50 bg-cyan-300/10 text-cyan-100' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Включена' : 'Выключена'}</span></button></div>{bindingsPanel(true)}</div>}
             {mainMenuScreen === 'achievements' && <div className="dead-achievements-grid grid max-h-[58vh] gap-3 overflow-y-auto pr-2 sm:grid-cols-2 lg:grid-cols-4">{ACHIEVEMENTS.map((achievement) => { const unlocked = unlockedAchievements.has(achievement.id); return <article key={achievement.id} className={`achievement-card min-h-36 border p-4 backdrop-blur-md ${unlocked ? 'achievement-card-unlocked border-amber-300/60 bg-[#211b10]/90' : 'border-white/10 bg-[#07101a]/85 grayscale'}`}><div className="flex items-start justify-between"><span className="text-2xl">{unlocked ? achievement.icon : '◇'}</span><small className={unlocked ? 'text-amber-200' : 'text-slate-600'}>{unlocked ? 'Открыто' : 'Закрыто'}</small></div><h3 className={`mt-3 text-xs font-black uppercase ${unlocked ? 'text-amber-50' : 'text-slate-500'}`}>{achievement.title}</h3><p className="mt-2 text-[9px] leading-4 text-slate-500">{'secret' in achievement && achievement.secret && !unlocked ? 'Секретное достижение' : achievement.description}</p></article>})}</div>}
             {mainMenuScreen === 'bestiary' && <BestiaryBook progress={bestiaryProgress}/>}
             {mainMenuScreen === 'records' && <RecordsTable userId={session?.user.id}/>}
+            {mainMenuScreen === 'trials' && <BossTrialsMenu onStart={startBossTrial} progress={bossTrialProgress} rewardMessage={trialRewardMessage}/>}
           </section>}
         </div><footer className="absolute bottom-5 right-6 z-20 text-[8px] uppercase tracking-[.22em] text-slate-300/35">Версия странника · Обычный режим</footer>
       </div>}
@@ -2666,7 +3006,7 @@ export default function App() {
           <button onClick={cancelWeaponReplacement} className="mt-5 border border-white/10 px-5 py-2 text-[9px] font-bold uppercase tracking-[.18em] text-slate-500 hover:border-white/30 hover:text-slate-300">Не заменять</button>
         </section>
       </div>}
-      {settingsOpen && <div className="fixed inset-0 z-[80] grid place-items-center bg-black/80 px-4 backdrop-blur-md"><section className="w-full max-w-2xl border border-cyan-300/25 bg-[#081116] p-6 shadow-[0_0_70px_rgba(34,211,238,.1)] md:p-8"><div className="flex items-start justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.35em] text-cyan-300">False Knight</p><h2 className="mt-2 text-3xl font-black uppercase">Настройки</h2></div><button onClick={() => setSettingsOpen(false)} className="border border-white/15 px-3 py-2 text-xs text-slate-400 hover:border-cyan-300/50">✕</button></div><div className="mt-7 grid gap-5"><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-xs font-black uppercase tracking-[.14em] ${settings.screenShake ? 'border-emerald-300/50 bg-emerald-300/10 text-emerald-200' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Вкл' : 'Выкл'}</span></button></div><div className="mt-7 border-t border-white/10 pt-5"><p className="text-[9px] font-black uppercase tracking-[.25em] text-slate-500">Управление</p><div className="mt-4 grid grid-cols-2 gap-2 text-[10px] text-slate-400 md:grid-cols-3">{[['WASD / стрелки','Движение'],['ЛКМ / J','Атака'],['S + ЛКМ в воздухе','Удар вниз'],['Q / F','Лечение Душой'],['E','Действие'],['Shift / C','Перекат']].map(([key, action]) => <div key={key} className="border border-white/10 bg-black/25 p-3"><kbd className="font-black text-slate-100">{key}</kbd><span className="mt-1 block">{action}</span></div>)}</div></div></section></div>}
+      {settingsOpen && <div className="fixed inset-0 z-[80] grid place-items-center bg-black/80 px-4 backdrop-blur-md"><section className="w-full max-w-2xl border border-cyan-300/25 bg-[#081116] p-6 shadow-[0_0_70px_rgba(34,211,238,.1)] md:p-8"><div className="flex items-start justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.35em] text-cyan-300">False Knight</p><h2 className="mt-2 text-3xl font-black uppercase">Настройки</h2></div><button onClick={() => setSettingsOpen(false)} className="border border-white/15 px-3 py-2 text-xs text-slate-400 hover:border-cyan-300/50">✕</button></div><div className="mt-7 grid gap-5"><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-xs font-black uppercase tracking-[.14em] ${settings.screenShake ? 'border-emerald-300/50 bg-emerald-300/10 text-emerald-200' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Вкл' : 'Выкл'}</span></button></div><div className="mt-7 border-t border-white/10 pt-5"><p className="text-[9px] font-black uppercase tracking-[.25em] text-slate-500">Управление</p><div className="mt-4 grid grid-cols-2 gap-2 text-[10px] text-slate-400 md:grid-cols-3">{[['WASD / стрелки','Движение'],['ЛКМ / J','Атака'],['S + ЛКМ в воздухе','Удар вниз'],['F','Лечение Душой'],['E','Действие'],['Shift / C','Перекат']].map(([key, action]) => <div key={key} className="border border-white/10 bg-black/25 p-3"><kbd className="font-black text-slate-100">{key}</kbd><span className="mt-1 block">{action}</span></div>)}</div></div></section></div>}
       {ending && <div className="ending-overlay fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 overflow-y-auto bg-black px-6 py-10 text-center"><div className="ending-lore grid gap-3"><p className="ending-line text-lg text-slate-300 md:text-2xl">...Я искал Безумного Царя, чтобы спасти это королевство.</p><p className="ending-line text-lg text-slate-300 md:text-2xl" style={{ animationDelay: '3.5s' }}>Но я бежал от своего собственного отражения.</p><p className="ending-line text-2xl font-black text-amber-200 md:text-4xl" style={{ animationDelay: '7s' }}>Круг замкнулся.</p><p className="ending-line text-sm uppercase tracking-[.3em] text-slate-500" style={{ animationDelay: '10.5s' }}>Спасибо за игру в False Knight!</p></div><section className="ending-summary w-full max-w-lg border-y border-amber-300/25 bg-[#050608] px-7 py-7 shadow-[0_0_70px_rgba(251,146,60,.09)]"><h2 className="text-3xl font-black uppercase tracking-[.16em] text-amber-50 md:text-4xl">Конец забега</h2><div className="mx-auto mt-5 max-w-sm border-y border-white/10 py-4 text-xs text-slate-400"><p className="flex justify-between"><span>Осколков собрано:</span><b className="text-amber-200">{runProgress.current.shards} 💎</b></p></div><div className="mt-5 border border-amber-300/15 bg-amber-300/5 p-4 text-sm leading-6 text-slate-300"><p className="mb-2 text-[8px] font-black uppercase tracking-[.3em] text-amber-300">Летопись забега</p>{chronicleLoading ? 'Хронист записывает последние строки…' : chronicle}</div><button onClick={finishRunToMainMenu} className="ending-menu-button mt-6 border border-cyan-300/45 bg-cyan-300/10 px-7 py-4 text-xs font-black uppercase tracking-[.16em] text-cyan-50">Вернуться в главное меню</button></section></div>}
       {shopOpen && <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[#07100f]/95 px-4 py-8 backdrop-blur-md">
         <div className="w-full max-w-6xl">
@@ -2680,14 +3020,14 @@ export default function App() {
           <button onClick={leaveShop} className="mx-auto mt-6 block border border-teal-300/50 bg-teal-300/10 px-8 py-3 text-xs font-black uppercase tracking-[.25em] text-teal-100 hover:bg-teal-300/20">Отправиться дальше</button>
         </div>
       </div>}
-      <div className="relative mx-auto flex h-full min-h-0 max-w-[1600px] flex-col justify-center px-3 py-3 md:px-7 md:py-5">
+      <div className="relative flex h-full min-h-0 w-full flex-col justify-center">
         {!started && choosingMode && <RunModeChoice value={runMode} onChange={setRunMode} onBack={() => setChoosingMode(false)} onContinue={() => { setChoosingMode(false); setChoosingLoadout(true); }}/>} 
-        {started && <header className="mb-3 flex items-end justify-between gap-4 px-1">
+        {started && <header className="flex shrink-0 items-end justify-between gap-4 px-4 py-2 md:px-7">
           <div><p className="text-[10px] font-bold uppercase tracking-[.38em] text-teal-300/70">Stage {String(sector).padStart(2, '0')} · {LOCATION_NAMES[location]}</p><h1 className="text-xl font-black uppercase tracking-tight md:text-2xl">False Knight <span className="font-light text-slate-500">// {currentTheme.subtitle}</span></h1></div>
           <div className="text-right text-[9px] font-black uppercase tracking-[.15em] text-amber-200"><p>{runModeName(runMode)}</p><p className={runMode === 'timed' && TIMED_RUN_SECONDS - elapsedHud < 120 ? 'text-rose-300' : 'text-slate-400'}>{runMode === 'timed' ? `${String(Math.max(0, Math.floor((TIMED_RUN_SECONDS - elapsedHud) / 60))).padStart(2, '0')}:${String(Math.max(0, TIMED_RUN_SECONDS - elapsedHud) % 60).padStart(2, '0')}` : `${String(Math.floor(elapsedHud / 60)).padStart(2, '0')}:${String(elapsedHud % 60).padStart(2, '0')}`}</p></div>
         </header>}
         <div className="flex min-h-0 flex-1 items-center justify-center">
-        <section className="relative aspect-video h-full max-h-[720px] w-auto max-w-full overflow-hidden rounded-sm border border-white/10 bg-[#101b23] shadow-[0_30px_90px_rgba(0,0,0,.65)]">
+        <section className="relative h-full min-h-0 w-full overflow-hidden bg-[#101b23]">
           <canvas
             ref={canvasRef}
             width="1280"
@@ -2696,8 +3036,8 @@ export default function App() {
             onPointerDown={(event) => {
               if (event.pointerType === 'mouse') return;
               event.preventDefault();
-              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE', bubbles: true }));
-              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE', bubbles: true }));
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: settings.bindings.interact, bubbles: true }));
+              window.dispatchEvent(new KeyboardEvent('keyup', { code: settings.bindings.interact, bubbles: true }));
             }}
           />
           <EnvironmentParticles/>
@@ -2726,6 +3066,8 @@ export default function App() {
             <div className="flex items-center gap-2 border border-amber-300/20 bg-black/40 px-3 py-2"><span className="h-2 w-2 rotate-45 bg-amber-300 shadow-[0_0_12px_#f59e0b]"/><span className="text-xs font-bold text-amber-100">{hud.shards}</span><span className="text-[9px] uppercase tracking-widest text-slate-500">осколков</span></div>
           </div>
           <div className="soul-vessel pointer-events-none absolute left-[220px] top-3 h-12 w-12 md:left-[330px] md:top-5 md:h-14 md:w-14"><div className="soul-liquid" style={{ height: `${soulHud}%`, opacity: soulHud > 0 ? 1 : 0 }}><i/><b/></div><span className="soul-glass-shine"/></div>
+          {combatCombo.hits > 0 && <div className="pointer-events-none absolute right-4 top-20 z-20 min-w-28 border-r-4 border-amber-300 bg-black/70 px-4 py-2 text-right md:right-6"><b className={`text-3xl font-black ${combatCombo.rank === 'S' ? 'text-amber-300' : combatCombo.rank === 'A' ? 'text-rose-300' : 'text-cyan-200'}`}>{combatCombo.rank}</b><span className="ml-2 text-[10px] font-black uppercase tracking-widest text-slate-300">{combatCombo.hits} combo</span><small className="block text-[8px] uppercase tracking-wider text-amber-200">награда ×{combatCombo.multiplier.toFixed(1)}</small></div>}
+          {bossTrial && <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 border border-rose-300/40 bg-black/75 px-5 py-2 text-center shadow-[0_0_30px_rgba(251,113,133,.15)]"><small className="block text-[7px] font-black uppercase tracking-[.25em] text-rose-300">Испытание босса</small><b className="text-xs uppercase text-slate-100">{bossTrial.boss}</b>{bossTrial.timeLimit && <strong className="ml-3 tabular-nums text-amber-200">{Math.max(0, bossTrial.timeLimit - elapsedHud)}с</strong>}{bossTrial.modifier === 'noHealing' && <span className="ml-3 text-[9px] font-black uppercase text-violet-300">Лечение запрещено</span>}</div>}
           {storyMessage && <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex justify-center px-6"><p className="max-w-2xl border-y border-amber-300/25 bg-black/85 px-7 py-4 text-center text-sm font-semibold leading-6 text-amber-50 shadow-[0_0_35px_rgba(0,0,0,.65)] md:text-lg">{storyMessage}</p></div>}
           {dailyRewardMessage && <div className="pointer-events-none absolute inset-x-0 top-24 z-30 flex justify-center px-6"><p className="max-w-xl border border-emerald-300/40 bg-[#07150f]/95 px-6 py-4 text-center text-sm font-black text-emerald-200 shadow-2xl">{dailyRewardMessage}</p></div>}
           {started && relicChoices.length > 0 && <RelicChoice choices={relicChoices} onChoose={chooseBossRelic}/>}
@@ -2742,7 +3084,7 @@ export default function App() {
         {started && <div className="desktop-weapon-slots pointer-events-none z-10 mx-auto -mt-[52px] mb-2 flex gap-1.5 md:-mt-[60px] md:mb-3 md:gap-2">
           {slots.map((slot, index) => <div key={index} title={slot.title} className={`relative grid h-10 w-10 place-items-center overflow-hidden border bg-[#091116]/85 text-xl shadow-lg backdrop-blur-sm md:h-12 md:w-12 md:text-2xl ${activeSlot === index ? 'border-teal-300 shadow-[0_0_18px_rgba(45,212,191,.25)]' : 'border-white/15'} ${slot.cd > 0 ? 'opacity-60' : ''}`}><span>{slot.icon}</span><span className="absolute left-1 top-0.5 text-[7px] font-black text-slate-400">{slot.key}</span>{slot.cd > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20"/>}</div>)}
         </div>}
-        {started && <footer className="mt-3 hidden items-center justify-center gap-5 text-[9px] font-semibold uppercase tracking-[.14em] text-slate-500 lg:flex"><span><b className="text-cyan-200">Tab</b> карта</span><span><b className="text-slate-300">A D / ← →</b> движение</span><span><b className="text-slate-300">Space / ↑</b> прыжок</span><span><b className="text-slate-300">W + атака</b> удар вверх</span><span><b className="text-slate-300">Q / F</b> лечение Душой</span><span><b className="text-slate-300">E</b> действие</span><span><b className="text-slate-300">ЛКМ / J</b> атака</span><span><b className="text-slate-300">Shift / C</b> перекат</span></footer>}
+        {started && <footer className="mt-3 hidden items-center justify-center gap-5 text-[9px] font-semibold uppercase tracking-[.14em] text-slate-500 lg:flex"><span><b className="text-cyan-200">Tab</b> карта</span><span><b className="text-slate-300">A D / ← →</b> движение</span><span><b className="text-slate-300">Space / ↑</b> прыжок</span><span><b className="text-slate-300">W + атака</b> удар вверх</span><span><b className="text-slate-300">F</b> лечение Душой</span><span><b className="text-slate-300">E</b> действие</span><span><b className="text-slate-300">ЛКМ / J</b> атака</span><span><b className="text-slate-300">Shift / C</b> перекат</span></footer>}
       </div>
     </main>
   );
