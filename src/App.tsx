@@ -39,6 +39,7 @@ import { BestiaryBook } from './components/BestiaryBook';
 import { RecordsTable } from './components/RecordsTable';
 import { loadBestiaryProgress, recordBestiaryKill } from './game/bestiary';
 import { saveRunRecord } from './lib/runRecords';
+import { deleteCloudSave, isCloudSaveDeletion, loadCloudSaves, uploadCloudSave } from './lib/cloudSaves';
 import { comboForHits, EMPTY_COMBO, type CombatCombo } from './game/combatCombo';
 import { createRoomEvents } from './game/roomEvents';
 import { BossTrialsMenu } from './components/BossTrialsMenu';
@@ -226,6 +227,7 @@ export default function App() {
   const [bestiaryProgress, setBestiaryProgress] = useState(loadBestiaryProgress);
   const menuSceneRef = useRef<HTMLDivElement>(null);
   const [saveSlots, setSaveSlots] = useState<Array<SavedGame | null>>(loadSaveSlots);
+  const [cloudSaveStatus, setCloudSaveStatus] = useState<'local' | 'syncing' | 'synced' | 'error'>('local');
   const [activeSaveSlot, setActiveSaveSlot] = useState<number | null>(null);
   const [, setAutosave] = useState<SavedGame | null>(loadAutosave);
   const [choosingLoadout, setChoosingLoadout] = useState(false);
@@ -337,6 +339,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!session) { setCloudSaveStatus('local'); return; }
+    let cancelled = false;
+    setCloudSaveStatus('syncing');
+    void loadCloudSaves().then(async (cloudSaves) => {
+      const merged = loadSaveSlots();
+      for (const cloud of cloudSaves) {
+        if (cloud.slot < 0 || cloud.slot >= SAVE_SLOT_COUNT) continue;
+        const localTime = merged[cloud.slot] ? Date.parse(merged[cloud.slot]!.savedAt) : 0;
+        if (isCloudSaveDeletion(cloud.saveData)) {
+          if (Date.parse(cloud.updatedAt) > localTime) merged[cloud.slot] = null;
+          continue;
+        }
+        const cloudSave = normalizeSave(cloud.saveData);
+        if (!cloudSave) continue;
+        const cloudTime = Date.parse(cloudSave.savedAt || cloud.updatedAt);
+        if (!merged[cloud.slot] || cloudTime > localTime) merged[cloud.slot] = cloudSave;
+      }
+      localStorage.setItem('ashfall-save-slots', JSON.stringify(merged));
+      if (!cancelled) setSaveSlots(merged);
+      await Promise.all(merged.map((save, slot) => save ? uploadCloudSave(session.user.id, slot, save) : Promise.resolve()));
+      if (!cancelled) setCloudSaveStatus('synced');
+    }).catch(() => { if (!cancelled) setCloudSaveStatus('error'); });
+    return () => { cancelled = true; };
+  }, [session?.user.id]);
+
+  useEffect(() => {
     settingsRef.current = settings; localStorage.setItem('false-knight-settings', JSON.stringify(settings));
   }, [settings]);
 
@@ -414,11 +442,15 @@ export default function App() {
       if (runMode === 'hardcore') return;
       const data: SavedGame = { savedAt: new Date().toISOString(), sector, location, mode: runMode, elapsedSeconds: runElapsed.current, progress: { ...runProgress.current, loadout: runProgress.current.loadout.map((gear) => ({ ...gear })) as [Gear, Gear, Gear, Gear] } };
       localStorage.setItem('ashfall-autosave', JSON.stringify(data)); setAutosave(data);
-      if (activeSaveSlot !== null) setSaveSlots((current) => { const next = [...current]; next[activeSaveSlot] = data; localStorage.setItem('ashfall-save-slots', JSON.stringify(next)); return next; });
+      if (activeSaveSlot !== null) setSaveSlots((current) => {
+        const next = [...current]; next[activeSaveSlot] = data; localStorage.setItem('ashfall-save-slots', JSON.stringify(next));
+        if (session) { setCloudSaveStatus('syncing'); void uploadCloudSave(session.user.id, activeSaveSlot, data).then(() => setCloudSaveStatus('synced')).catch(() => setCloudSaveStatus('error')); }
+        return next;
+      });
     };
     save(); const timer = window.setInterval(save, 10000);
     return () => { window.clearInterval(timer); save(); };
-  }, [started, sector, location, activeSaveSlot, runMode]);
+  }, [started, sector, location, activeSaveSlot, runMode, session]);
 
   useEffect(() => {
     if (!started) return;
@@ -2863,7 +2895,12 @@ export default function App() {
   const persistSaveSlots = (nextSlots: Array<SavedGame | null>) => {
     setSaveSlots(nextSlots); localStorage.setItem('ashfall-save-slots', JSON.stringify(nextSlots));
   };
-  const deleteSave = (slot: number) => { if (!window.confirm(`Стереть сохранение в слоте ${slot + 1}?`)) return; const nextSlots = [...saveSlots]; nextSlots[slot] = null; persistSaveSlots(nextSlots); if (activeSaveSlot === slot) setActiveSaveSlot(null); };
+  const deleteSave = (slot: number) => {
+    if (!window.confirm(`Стереть сохранение в слоте ${slot + 1}?`)) return;
+    const nextSlots = [...saveSlots]; nextSlots[slot] = null; persistSaveSlots(nextSlots);
+    if (activeSaveSlot === slot) setActiveSaveSlot(null);
+    if (session) { setCloudSaveStatus('syncing'); void deleteCloudSave(session.user.id, slot).then(() => setCloudSaveStatus('synced')).catch(() => setCloudSaveStatus('error')); }
+  };
   const beginNewInSlot = (slot: number) => { setActiveSaveSlot(slot); setRunMode('normal'); setStartingWeapons(['sword', 'bow']); setChoosingMode(true); };
   const startNewGame = () => {
     bossTrialRef.current = null; setBossTrial(null);
@@ -2952,9 +2989,9 @@ export default function App() {
         <div className="dead-menu-mist"/><div className="dead-menu-cliff"/>
         <svg className="dead-menu-clouds-svg dead-menu-clouds-near" viewBox="0 0 1400 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g className="cloud-bank cloud-bank-a"><circle cx="90" cy="390" r="80"/><circle cx="176" cy="350" r="118"/><circle cx="280" cy="386" r="91"/><circle cx="365" cy="409" r="59"/><path d="M15 425Q150 349 275 409T430 438Q340 474 65 466Z"/></g><g className="cloud-bank cloud-bank-c"><circle cx="940" cy="300" r="79"/><circle cx="1030" cy="253" r="126"/><circle cx="1145" cy="292" r="94"/><circle cx="1240" cy="325" r="64"/><path d="M850 346Q1000 260 1130 329T1325 360Q1210 401 902 389Z"/></g></svg><div className="dead-menu-grain"/>
         <header className="absolute inset-x-0 top-0 z-20 flex items-start justify-between p-6 md:p-10"><div><p className="text-[9px] font-black uppercase tracking-[.48em] text-cyan-200/70">Проклятое королевство</p><h1 className="mt-2 text-2xl font-black uppercase tracking-[.12em] text-slate-100 drop-shadow-[0_3px_8px_rgba(0,0,0,.8)] md:text-4xl">False Knight</h1></div><button onClick={() => session ? supabase.auth.signOut() : setShowAuth(true)} disabled={!authReady} className="dead-menu-account border border-white/15 bg-black/20 px-4 py-2 text-[9px] font-black uppercase tracking-[.18em] text-slate-300">{session ? 'Выйти' : 'Войти'}</button></header>
-        <div className="absolute inset-0 z-10 flex items-center px-7 pb-8 pt-24 md:px-14 lg:px-24">
+        <div className="dead-menu-content absolute inset-0 z-10 flex items-center px-7 pb-8 pt-24 md:px-14 lg:px-24">
           {mainMenuScreen === 'main' ? <section className="dead-menu-main w-full max-w-xl"><p className="mb-4 text-[10px] font-bold uppercase tracking-[.4em] text-orange-200/70">Память ждёт в стенах замка</p><nav className="grid justify-start gap-1"><button onClick={() => setMainMenuScreen('saves')} className="dead-menu-item">Играть</button><button onClick={() => setMainMenuScreen('settings')} className="dead-menu-item">Настройки</button><button onClick={() => setMainMenuScreen('bestiary')} className="dead-menu-item">Книга врагов</button><button onClick={() => setMainMenuScreen('trials')} className="dead-menu-item">Испытания боссов</button><button onClick={() => setMainMenuScreen('records')} className="dead-menu-item">Таблица рекордов</button><button onClick={() => setMainMenuScreen('achievements')} className="dead-menu-item">Достижения</button></nav><p className="mt-6 max-w-sm border-l border-cyan-200/30 pl-4 text-[10px] leading-5 text-slate-300/55">Поднимись со дна Подземелья. Верни утраченную силу и узнай, кому принадлежит пустой трон.</p><DailyChallengeCard challenge={dailyChallenge} progress={dailyProgress(dailyChallenge, summarizeRun())} loading={dailyLoading} completed={dailyReward.completedDate === dailyChallenge.date} streak={dailyReward.streak}/></section> : <section className="dead-submenu w-full"><div className="mb-5 flex items-end justify-between border-b border-white/15 pb-4"><div><button onClick={() => setMainMenuScreen('main')} className="mb-3 text-[9px] font-black uppercase tracking-[.22em] text-cyan-200/70 hover:text-cyan-100">← Главное меню</button><h2 className="text-2xl font-black uppercase tracking-[.08em] md:text-4xl">{mainMenuScreen === 'saves' ? 'Выбор слота' : mainMenuScreen === 'settings' ? 'Настройки' : mainMenuScreen === 'bestiary' ? 'Книга врагов и боссов' : mainMenuScreen === 'records' ? 'Таблица рекордов' : mainMenuScreen === 'trials' ? 'Испытания боссов' : 'Достижения'}</h2></div>{mainMenuScreen === 'achievements' && <b className="text-xs text-amber-200">{unlockedAchievements.size} / {ACHIEVEMENTS.length}</b>}</div>
-            {mainMenuScreen === 'saves' && <div className="dead-slots-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{saveSlots.map((save, index) => <article key={index} className="dead-slot relative min-h-52 border border-white/15 bg-[#07101a]/85 p-4 backdrop-blur-md"><p className="text-[8px] font-black uppercase tracking-[.25em] text-slate-500">Слот {index + 1}</p>{save ? <><button onClick={() => deleteSave(index)} title="Сбросить прогресс" className="absolute right-3 top-3 border border-rose-400/20 px-2 py-1 text-[8px] uppercase text-rose-300/70 hover:border-rose-300/60 hover:text-rose-200">☠ Сбросить прогресс</button><button onClick={() => loadGame(save, index)} className="dead-slot-button mt-11 w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Продолжить (Обычный режим)</button><p className="mt-5 border-t border-white/10 pt-4 text-[9px] leading-5 text-slate-400">Уровень: <b className="text-slate-100">{LOCATION_NAMES_RU[save.location]}</b><br/>Осколки: <b className="text-amber-200">{save.progress.shards ?? save.progress.cells ?? 0} 💎</b><br/>Здоровье: <b className="text-rose-200">{save.progress.hp}/5 🩸</b></p></> : <div className="grid h-40 place-items-center"><button onClick={() => beginNewInSlot(index)} className="dead-slot-button w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Новый забег (Обычный режим)</button></div>}</article>)}</div>}
+            {mainMenuScreen === 'saves' && <div><p className={`mb-3 text-[9px] font-black uppercase tracking-[.18em] ${cloudSaveStatus === 'error' ? 'text-rose-300' : cloudSaveStatus === 'synced' ? 'text-emerald-300' : 'text-slate-500'}`}>{cloudSaveStatus === 'local' ? 'Сохранения только на этом устройстве — войдите для синхронизации' : cloudSaveStatus === 'syncing' ? '☁ Синхронизация сохранений…' : cloudSaveStatus === 'synced' ? '☁ Сохранения синхронизированы' : 'Не удалось связаться с облаком — локальная копия сохранена'}</p><div className="dead-slots-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{saveSlots.map((save, index) => <article key={index} className="dead-slot relative min-h-52 border border-white/15 bg-[#07101a]/85 p-4 backdrop-blur-md"><p className="text-[8px] font-black uppercase tracking-[.25em] text-slate-500">Слот {index + 1}</p>{save ? <><button onClick={() => deleteSave(index)} title="Сбросить прогресс" className="absolute right-3 top-3 border border-rose-400/20 px-2 py-1 text-[8px] uppercase text-rose-300/70 hover:border-rose-300/60 hover:text-rose-200">☠ Сбросить прогресс</button><button onClick={() => loadGame(save, index)} className="dead-slot-button mt-11 w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Продолжить (Обычный режим)</button><p className="mt-5 border-t border-white/10 pt-4 text-[9px] leading-5 text-slate-400">Уровень: <b className="text-slate-100">{LOCATION_NAMES_RU[save.location]}</b><br/>Осколки: <b className="text-amber-200">{save.progress.shards ?? save.progress.cells ?? 0} 💎</b><br/>Здоровье: <b className="text-rose-200">{save.progress.hp}/5 🩸</b></p></> : <div className="grid h-40 place-items-center"><button onClick={() => beginNewInSlot(index)} className="dead-slot-button w-full border border-cyan-200/40 bg-cyan-300/5 px-3 py-3 text-[10px] font-black uppercase tracking-[.1em] text-cyan-50">Новый забег (Обычный режим)</button></div>}</article>)}</div></div>}
             {mainMenuScreen === 'settings' && <div className="dead-settings mx-auto grid max-w-4xl gap-5 rounded-sm border border-white/15 bg-[#07101a]/85 p-5 backdrop-blur-md md:grid-cols-2 md:p-7"><div className="grid content-start gap-5"><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-[10px] font-black uppercase tracking-[.16em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-[10px] font-black uppercase tracking-[.15em] ${settings.screenShake ? 'border-cyan-300/50 bg-cyan-300/10 text-cyan-100' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Включена' : 'Выключена'}</span></button></div>{bindingsPanel(true)}</div>}
             {mainMenuScreen === 'achievements' && <div className="dead-achievements-grid grid max-h-[58vh] gap-3 overflow-y-auto pr-2 sm:grid-cols-2 lg:grid-cols-4">{ACHIEVEMENTS.map((achievement) => { const unlocked = unlockedAchievements.has(achievement.id); return <article key={achievement.id} className={`achievement-card min-h-36 border p-4 backdrop-blur-md ${unlocked ? 'achievement-card-unlocked border-amber-300/60 bg-[#211b10]/90' : 'border-white/10 bg-[#07101a]/85 grayscale'}`}><div className="flex items-start justify-between"><span className="text-2xl">{unlocked ? achievement.icon : '◇'}</span><small className={unlocked ? 'text-amber-200' : 'text-slate-600'}>{unlocked ? 'Открыто' : 'Закрыто'}</small></div><h3 className={`mt-3 text-xs font-black uppercase ${unlocked ? 'text-amber-50' : 'text-slate-500'}`}>{achievement.title}</h3><p className="mt-2 text-[9px] leading-4 text-slate-500">{'secret' in achievement && achievement.secret && !unlocked ? 'Секретное достижение' : achievement.description}</p></article>})}</div>}
             {mainMenuScreen === 'bestiary' && <BestiaryBook progress={bestiaryProgress}/>}
