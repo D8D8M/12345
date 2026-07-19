@@ -410,6 +410,13 @@ export default function App() {
   }, [dailyChallenge.date]);
 
   useEffect(() => {
+    const now = new Date();
+    const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timer = window.setTimeout(() => setDailyChallenge(loadDailyChallenge()), nextDay.getTime() - now.getTime() + 1000);
+    return () => window.clearTimeout(timer);
+  }, [dailyChallenge.date]);
+
+  useEffect(() => {
     if (!started || dailyReward.completedDate === dailyChallenge.date) return;
     if (dailyProgress(dailyChallenge, summarizeRun()) < dailyChallenge.target) return;
     const claimed = claimDailyReward();
@@ -487,12 +494,12 @@ export default function App() {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     const throneScene = location === 'throne', prisonLayout = location === 'prison', cryptLayout = location === 'crypt', swampLayout = location === 'swamps', mineLayout = location === 'mines', clockLayout = location === 'clock', bridgeLayout = location === 'bridge', castleLayout = location === 'castle';
-    // Stage 1 is a deliberately dense 3100x2000 scrolling dungeon. Other biomes
-    // keep their larger room scale, while Cells reads as one continuous tilemap.
-    const ROOM_COLS = throneScene || clockLayout ? 1 : castleLayout ? 5 : bridgeLayout ? 5 : swampLayout ? 10 : mineLayout ? 5 : prisonLayout ? 5 : cryptLayout ? 5 : 6;
-    const ROOM_ROWS = throneScene || swampLayout || bridgeLayout ? 1 : castleLayout ? 4 : clockLayout ? 8 : mineLayout || prisonLayout ? 4 : 5;
-    const roomW = throneScene ? 2100 : castleLayout ? CASTLE_WORLD.width / ROOM_COLS : bridgeLayout ? BRIDGE_WORLD.width / ROOM_COLS : clockLayout ? CLOCK_TOWER_WORLD.width : swampLayout ? 700 : mineLayout ? MINES_WORLD.width / ROOM_COLS : prisonLayout ? 620 : cryptLayout ? CRYPT_WORLD.width / ROOM_COLS : 820;
-    const roomH = throneScene ? 820 : castleLayout ? CASTLE_WORLD.height / ROOM_ROWS : bridgeLayout ? BRIDGE_WORLD.height : clockLayout ? CLOCK_TOWER_WORLD.height / ROOM_ROWS : swampLayout ? SWAMP_WORLD.height : mineLayout ? MINES_WORLD.height / ROOM_ROWS : prisonLayout ? 500 : cryptLayout ? CRYPT_WORLD.height / ROOM_ROWS : 620, roomMargin = prisonLayout || swampLayout || mineLayout || clockLayout || cryptLayout || bridgeLayout || castleLayout ? 0 : 60;
+    // Prison Cells uses a compact classic-maze plan: a balanced 3x2 grid of
+    // medium rooms instead of a stack of narrow vertical shafts.
+    const ROOM_COLS = throneScene || clockLayout ? 1 : castleLayout ? 3 : bridgeLayout ? 5 : swampLayout ? 10 : mineLayout ? 3 : prisonLayout ? 3 : cryptLayout ? 5 : 6;
+    const ROOM_ROWS = throneScene || swampLayout || bridgeLayout ? 1 : castleLayout || prisonLayout ? 2 : clockLayout ? 8 : mineLayout ? 3 : 5;
+    const roomW = throneScene ? 2100 : castleLayout ? CASTLE_WORLD.width / ROOM_COLS : bridgeLayout ? BRIDGE_WORLD.width / ROOM_COLS : clockLayout ? CLOCK_TOWER_WORLD.width : swampLayout ? 700 : mineLayout ? MINES_WORLD.width / ROOM_COLS : prisonLayout ? 760 : cryptLayout ? CRYPT_WORLD.width / ROOM_COLS : 820;
+    const roomH = throneScene ? 820 : castleLayout ? CASTLE_WORLD.height / ROOM_ROWS : bridgeLayout ? BRIDGE_WORLD.height : clockLayout ? CLOCK_TOWER_WORLD.height / ROOM_ROWS : swampLayout ? SWAMP_WORLD.height : mineLayout ? MINES_WORLD.height / ROOM_ROWS : prisonLayout ? 680 : cryptLayout ? CRYPT_WORLD.height / ROOM_ROWS : 620, roomMargin = prisonLayout || swampLayout || mineLayout || clockLayout || cryptLayout || bridgeLayout || castleLayout ? 0 : 60;
     const initialRoomId = castleLayout ? ROOM_COLS * (ROOM_ROWS - 1) + Math.floor(ROOM_COLS / 2) : clockLayout ? ROOM_ROWS - 1 : throneScene || cryptLayout || swampLayout || bridgeLayout ? 0 : ROOM_COLS;
     const worldW = roomMargin * 2 + ROOM_COLS * roomW, worldH = roomMargin * 2 + ROOM_ROWS * roomH;
     const groundY = 620, lowerGroundY = 1420, deepGroundY = 2100;
@@ -591,25 +598,33 @@ export default function App() {
       const current = rooms[mazeStack[mazeStack.length - 1]];
       const available = roomNeighbors(current).filter((id) => !mazeVisited.has(id)).sort((a, b) => {
         const aVertical = Math.abs(a - current.id) === ROOM_COLS, bVertical = Math.abs(b - current.id) === ROOM_COLS;
-        const orientationBias = cryptLayout ? Number(bVertical) - Number(aVertical) : prisonLayout || mineLayout ? Number(aVertical) - Number(bVertical) : 0;
+        const orientationBias = cryptLayout || prisonLayout ? Number(bVertical) - Number(aVertical) : mineLayout ? Number(aVertical) - Number(bVertical) : 0;
         return orientationBias || Math.random() - .5;
       });
       if (!available.length) { mazeStack.pop(); continue; }
       const next = available[0]; current.connections.add(next); rooms[next].connections.add(current.id); mazeVisited.add(next); mazeStack.push(next);
     }
-    if (castleLayout) {
+    if (prisonLayout) {
+      // Hand-authored 3x2 dungeon: horizontal corridors carry the main route,
+      // while two hatch links create dead-end branches and a loop between floors.
+      for (const room of rooms) room.connections.clear();
+      const connect = (from: number, to: number) => { rooms[from].connections.add(to); rooms[to].connections.add(from); };
+      connect(0, 1); connect(1, 2);
+      connect(3, 4); connect(4, 5);
+      connect(1, 4); connect(2, 5);
+    } else if (castleLayout) {
       // A mirrored palace plan: every row is traversable, while alternating
       // stair towers create a readable maze instead of one random cave route.
       for (const room of rooms) room.connections.clear();
       const connect = (from: number, to: number) => { rooms[from].connections.add(to); rooms[to].connections.add(from); };
       for (let row = 0; row < ROOM_ROWS; row++) for (let col = 0; col < ROOM_COLS - 1; col++) connect(row * ROOM_COLS + col, row * ROOM_COLS + col + 1);
       for (let row = 0; row < ROOM_ROWS - 1; row++) {
-        const stairColumns = row % 2 ? [0, 2, 4] : [1, 3];
+        const stairColumns = (row % 2 ? [0, 2] : [1]).filter((col) => col < ROOM_COLS);
         for (const col of stairColumns) connect(row * ROOM_COLS + col, (row + 1) * ROOM_COLS + col);
       }
     }
     // Дополнительные связи создают редкие кольца и развилки, сохраняя тупики.
-    const extraConnectionChance = castleLayout ? 0 : prisonLayout ? .1 : cryptLayout ? .06 : mineLayout ? .28 : .18;
+    const extraConnectionChance = castleLayout || prisonLayout ? 0 : cryptLayout ? .06 : mineLayout ? .28 : .18;
     for (const room of rooms) if (Math.random() < extraConnectionChance) {
       const candidates = roomNeighbors(room).filter((id) => !room.connections.has(id));
       if (candidates.length) { const next = candidates[Math.floor(Math.random() * candidates.length)]; room.connections.add(next); rooms[next].connections.add(room.id); }
@@ -658,7 +673,25 @@ export default function App() {
       ];
       const roomTemplates = prisonLayout ? prisonTemplates : cryptLayout ? cryptTemplates : standardTemplates;
       const template = roomTemplates[Math.floor(Math.random() * roomTemplates.length)];
-      if (!throneScene && location !== 'mines') for (const [offsetX, offsetY, width] of template) oneWays.push({ x: room.x + offsetX, y: room.y + offsetY, w: width, h: 16 });
+      if (prisonLayout) {
+        // Broad alternating landings keep each cell block readable and leave
+        // the central line clear for the hatch route between both floors.
+        for (let floor = 0, y = room.y + roomH - 175; y > room.y + 90; floor++, y -= 145) {
+          const width = floor % 3 === 2 ? roomW - 245 : 245;
+          const x = floor % 2 ? room.x + roomW - wall - width - 18 : room.x + wall + 18;
+          oneWays.push({ x, y, w: width, h: 16 });
+        }
+      } else if (castleLayout) {
+        // Giant open halls use broad balcony tiers and keep a large empty nave.
+        const balconyWidth = roomW * .34;
+        oneWays.push(
+          { x: room.x + wall + 55, y: room.y + roomH * .72, w: balconyWidth, h: 22 },
+          { x: room.x + roomW - wall - 55 - balconyWidth, y: room.y + roomH * .72, w: balconyWidth, h: 22 },
+          { x: room.x + roomW * .27, y: room.y + roomH * .48, w: roomW * .46, h: 22 },
+          { x: room.x + wall + 95, y: room.y + roomH * .25, w: roomW * .28, h: 22 },
+          { x: room.x + roomW - wall - 95 - roomW * .28, y: room.y + roomH * .25, w: roomW * .28, h: 22 },
+        );
+      } else if (!throneScene && location !== 'mines') for (const [offsetX, offsetY, width] of template) oneWays.push({ x: room.x + offsetX, y: room.y + offsetY, w: width, h: 16 });
       if ((upOpen || downOpen) && location !== 'mines') {
         // Узкая лестница покрывает всю высоту комнаты. Последняя ступень
         // находится прямо под проёмом, поэтому до верхнего этажа можно допрыгнуть.
@@ -696,7 +729,7 @@ export default function App() {
     }
     const minesLevel = mineLayout ? createMinesLevel(rooms.map((room) => ({ ...room, w: roomW, h: roomH })), ROOM_COLS) : null;
     if (minesLevel) { oneWays.push(...minesLevel.platforms); dividers.push(...minesLevel.obstacles); }
-    const castleLevel = castleLayout ? createCastleLevel(rooms, roomW, roomH) : null;
+    const castleLevel = castleLayout ? createCastleLevel(rooms, roomW, roomH, ROOM_COLS) : null;
     const platformBlockingSolids: Box[] = [...terrain, ...ceilings, ...dividers];
     const platformsToPlace = clockLevel
       ? oneWays.filter((platform) => !clockLevel.exitPlatforms.includes(platform as ClockPlatform))
@@ -807,15 +840,21 @@ export default function App() {
       gear?: Gear;
       lore?: string;
     };
-    const randomSpawnLayout = prisonLayout || mineLayout || cryptLayout;
-    // These stages may begin in any room. Exit distance is calculated from this
-    // newly selected room, so a randomized spawn can never leave a door nearby.
-    const startRoomId = randomSpawnLayout && !cryptLayout
-      ? rooms[Math.floor(Math.random() * rooms.length)].id
-      : initialRoomId;
+    type SpawnEdge = 'left' | 'right' | 'custom';
+    // Roll once per level creation and reuse the result for the player, the
+    // start room and the entrance door. This prevents those three objects from
+    // drifting to different sides after a randomized edge spawn.
+    const spawnEdge: SpawnEdge = prisonLayout || mineLayout
+      ? (Math.random() < .5 ? 'left' : 'right')
+      : swampLayout
+      ? 'left'
+      : 'custom';
+    const edgeStartRow = prisonLayout ? ROOM_ROWS - 1 : mineLayout ? ROOM_ROWS - 1 : 0;
+    const edgeStartRoomId = edgeStartRow * ROOM_COLS + (spawnEdge === 'right' ? ROOM_COLS - 1 : 0);
+    const startRoomId = prisonLayout || mineLayout ? edgeStartRoomId : initialRoomId;
     // The crypt opens directly in the Warden's arena: the player appears on
     // the safe left side, facing the boss on the right.
-    const cryptSpawnSpot = cryptLevel ? { x: 120, y: 509 } : undefined;
+    const cryptSpawnSpot = cryptLevel ? { x: 150, y: 509 } : undefined;
     const roomDistance = Array.from({ length: rooms.length }, () => Number.POSITIVE_INFINITY);
     const routeParent = Array.from({ length: rooms.length }, () => -1);
     roomDistance[startRoomId] = 0;
@@ -825,27 +864,40 @@ export default function App() {
       for (const next of rooms[current].connections) if (!Number.isFinite(roomDistance[next])) { roomDistance[next] = roomDistance[current] + 1; routeParent[next] = current; distanceQueue.push(next); }
     }
     const byDistance = (a: Room, b: Room) => roomDistance[b.id] - roomDistance[a.id];
-    const exitSide = (room: Room) => clockLayout ? room.row === 0 : castleLayout ? room.row === 0 : cryptLayout ? room.row >= ROOM_ROWS - 2 : prisonLayout ? room.col >= ROOM_COLS - 2 : room.col >= 2;
+    const graphDistance = (from: number, to: number) => {
+      const distances = Array.from({ length: rooms.length }, () => Number.POSITIVE_INFINITY);
+      distances[from] = 0;
+      const queue = [from];
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (current === to) return distances[current];
+        for (const next of rooms[current].connections) if (!Number.isFinite(distances[next])) { distances[next] = distances[current] + 1; queue.push(next); }
+      }
+      return 0;
+    };
+    // Exits are selected by travel distance, not by a prescribed edge or corner.
+    const exitSide = (_room: Room) => true;
     const deadEndRooms = rooms.filter((room) => room.connections.size === 1 && room.id !== startRoomId && exitSide(room)).sort(byDistance);
     const distantRooms = rooms.filter((room) => room.id !== startRoomId && exitSide(room) && !deadEndRooms.includes(room)).sort(byDistance);
     const routeDestinations: Array<Exclude<LocationKind, 'prison'>> = location === 'prison' ? ['swamps', 'mines'] : location === 'swamps' ? ['clock'] : location === 'mines' ? ['clock', 'clock'] : location === 'clock' ? ['crypt', 'bridge'] : location === 'crypt' ? ['castle', 'castle'] : location === 'bridge' ? ['castle'] : location === 'castle' ? ['throne', 'throne'] : [];
     const exitCandidates = [...deadEndRooms, ...distantRooms];
     const farthestDistance = exitCandidates.reduce((maximum, room) => Math.max(maximum, roomDistance[room.id]), 0);
-    const minimumExitDistance = Math.max(2, Math.floor(farthestDistance * .65));
+    // Keep exits in the farthest band of the map: at most one room transition
+    // closer than the most distant reachable room from the player's spawn.
+    const minimumExitDistance = Math.max(2, farthestDistance - 1);
     const farExitCandidates = exitCandidates.filter((room) => roomDistance[room.id] >= minimumExitDistance);
     const exitRooms: Room[] = [];
     const usableExitCandidates = farExitCandidates.length >= routeDestinations.length ? farExitCandidates : exitCandidates;
-    const keepOriginalExitPlacement = swampLayout || clockLayout || bridgeLayout || castleLayout || throneScene;
+    const keepOriginalExitPlacement = clockLayout || throneScene;
     if (keepOriginalExitPlacement) {
       for (let index = 0; index < routeDestinations.length; index++) {
         const available = usableExitCandidates.filter((room) => !exitRooms.includes(room));
         if (!available.length) break;
         const ranked = index === 0 ? available : available.sort((a, b) => {
-          const separation = (room: Room) => Math.min(...exitRooms.map((chosen) => Math.abs(room.col - chosen.col) + Math.abs(room.row - chosen.row)));
+          const separation = (room: Room) => Math.min(...exitRooms.map((chosen) => graphDistance(room.id, chosen.id)));
           return separation(b) - separation(a) || roomDistance[b.id] - roomDistance[a.id];
         });
-        const randomPool = ranked.slice(0, Math.min(5, ranked.length));
-        exitRooms.push(randomPool[Math.floor(Math.random() * randomPool.length)]);
+        exitRooms.push(ranked[0]);
       }
     } else if (routeDestinations.length === 1 && usableExitCandidates.length) {
       exitRooms.push([...usableExitCandidates].sort(byDistance)[0]);
@@ -857,25 +909,14 @@ export default function App() {
         const a = usableExitCandidates[first], b = usableExitCandidates[second];
         pairs.push({
           rooms: [a, b],
-          separation: Math.abs(a.col - b.col) + Math.abs(a.row - b.row),
+          separation: graphDistance(a.id, b.id),
           distance: Math.min(roomDistance[a.id], roomDistance[b.id]),
         });
       }
-      const bestPair = pairs.sort((a, b) => b.separation - a.separation || b.distance - a.distance)[0];
+      // Both doors must first be near the opposite end from spawn. Only then
+      // maximize the distance between the two exits themselves.
+      const bestPair = pairs.sort((a, b) => b.distance - a.distance || b.separation - a.separation)[0];
       if (bestPair) exitRooms.push(...bestPair.rooms);
-    }
-    // Story exits on these stages belong at deliberately distant corners.
-    // Do not let the randomized maze put two doors in neighbouring rooms or
-    // leave an exit close to the player's starting room.
-    const fixedCornerExitIds = castleLayout
-      ? [0, ROOM_COLS - 1] // opposite corners of the castle's top floor
-      : swampLayout || bridgeLayout
-        ? [ROOM_COLS - 1] // opposite end of the long horizontal level
-        : null;
-    if (fixedCornerExitIds) {
-      exitRooms.splice(0, exitRooms.length, ...fixedCornerExitIds
-        .slice(0, routeDestinations.length)
-        .map((id) => rooms[id]));
     }
     if (clockLayout && exitRooms.length === 1 && routeDestinations.length === 2) exitRooms.push(exitRooms[0]);
     const allCryptDoorSpots = cryptLevel ? [
@@ -902,12 +943,47 @@ export default function App() {
       });
       cryptDoorSpots.push(availableCryptSpots.shift()!);
     }
+    const chosenDoorSpots: Array<{ x: number; y: number }> = [];
+    const supportedDoorSpot = (room: Room) => {
+      const supports = [...terrain, ...oneWays].filter((surface) =>
+        surface.w >= 98 && surface.x < room.x + roomW && surface.x + surface.w > room.x && surface.y > room.y + 90 && surface.y <= room.y + roomH - wall + 1
+      );
+      const candidates = supports.flatMap((surface) => [0.2, 0.5, 0.8].map((position) => ({
+        x: Math.max(surface.x + 20, Math.min(surface.x + surface.w - 78, surface.x + surface.w * position - 29)),
+        y: surface.y - 72,
+      }))).filter((spot) => {
+        const doorBox = { x: spot.x, y: spot.y, w: 58, h: 72 };
+        return ![...terrain, ...ceilings, ...dividers, ...oneWays].some((block) =>
+          doorBox.x < block.x + block.w && doorBox.x + doorBox.w > block.x && doorBox.y < block.y + block.h && doorBox.y + doorBox.h > block.y
+        );
+      });
+      if (!candidates.length) return { x: room.x + roomW / 2 - 29, y: room.y + roomH - wall - 72 };
+      const startCenter = { x: rooms[startRoomId].x + roomW / 2, y: rooms[startRoomId].y + roomH / 2 };
+      return candidates.sort((a, b) => {
+        const score = (spot: { x: number; y: number }) => Math.min(
+          Math.hypot(spot.x - startCenter.x, spot.y - startCenter.y),
+          chosenDoorSpots.length ? Math.min(...chosenDoorSpots.map((chosen) => Math.hypot(spot.x - chosen.x, spot.y - chosen.y))) : Number.POSITIVE_INFINITY,
+        );
+        return score(b) - score(a);
+      })[0];
+    };
     const doors: Door[] = exitRooms.map((room, index) => {
       const clockExitPlatform = clockLayout ? clockLevel?.exitPlatforms[index] : undefined;
       const cryptSpot = cryptLayout ? cryptDoorSpots[index % cryptDoorSpots.length] : undefined;
+      const supportedSpot = !clockExitPlatform && !cryptSpot && !swampLayout && !bridgeLayout ? supportedDoorSpot(room) : undefined;
+      const spot = clockExitPlatform
+        ? { x: clockExitPlatform.x + (clockExitPlatform.w - 58) / 2, y: clockExitPlatform.y - 72 }
+        : cryptSpot
+        ? cryptSpot
+        : swampLayout
+        ? { x: SWAMP_WORLD.width - wall - 100, y: 3163 }
+        : bridgeLayout
+        ? { x: BRIDGE_WORLD.width - wall - 58, y: 538 }
+        : supportedSpot!;
+      chosenDoorSpots.push(spot);
       return {
-        x: clockExitPlatform ? clockExitPlatform.x + (clockExitPlatform.w - 58) / 2 : clockLayout ? (index === 0 ? 300 : 842) : cryptSpot ? cryptSpot.x : bridgeLayout ? BRIDGE_WORLD.width - wall - 58 : Math.random() < .5 ? room.x + wall + 34 : room.x + roomW - wall - 92,
-        y: clockExitPlatform ? clockExitPlatform.y - 72 : swampLayout ? 3163 : cryptSpot ? cryptSpot.y : bridgeLayout ? 538 : room.y + roomH - wall - 72,
+        x: spot.x,
+        y: spot.y,
         w: 58, h: 72, opening: 0, destination: routeDestinations[index], label: LOCATION_NAMES[routeDestinations[index]],
       };
     });
@@ -952,9 +1028,32 @@ export default function App() {
     const swampSpawnPlatform = swampPlatforms
       .filter(({ route }) => route === 'main')
       .sort((a, b) => a.x - b.x)[0];
-    const spawnX = clockLayout ? CLOCK_TOWER_WORLD.width / 2 - 17 : bridgeLayout ? 120 : swampSpawnPlatform ? swampSpawnPlatform.x + swampSpawnPlatform.w / 2 - 17 : cryptSpawnSpot ? cryptSpawnSpot.x : startRoom.x + 105;
+    const bossArenaEntranceX = 150;
+    const spawnX = prisonLayout || mineLayout
+      ? (spawnEdge === 'left' ? 80 : worldW - 120)
+      : clockLayout ? CLOCK_TOWER_WORLD.width / 2
+      : bridgeLayout ? 150
+      : swampSpawnPlatform ? 80
+      : cryptSpawnSpot ? cryptSpawnSpot.x
+      : castleLayout ? 100
+      : throneScene ? bossArenaEntranceX
+      : startRoom.x + 105;
     const spawnY = clockLayout ? CLOCK_TOWER_WORLD.height - 126 : bridgeLayout ? 554 : swampSpawnPlatform ? swampSpawnPlatform.y - 56 : cryptSpawnSpot ? cryptSpawnSpot.y : startRoom.y + roomH - wall - 56;
-    const spawnSafeRadius = 220;
+    const entranceSide: 'left' | 'right' | 'center' = spawnEdge === 'right' ? 'right' : clockLayout ? 'center' : 'left';
+    const entranceDoor = {
+      x: entranceSide === 'right' ? worldW - 100 : entranceSide === 'center' ? spawnX - 29 : Math.max(42, spawnX - 58),
+      y: spawnY - 16,
+      w: 58,
+      h: 72,
+      side: entranceSide,
+    };
+    const locationNpc = mineLayout ? {
+      name: 'Бродячий Кузнец',
+      x: spawnX + (spawnEdge === 'left' ? 150 : -150),
+      y: spawnY + 4,
+      color: '#9a6a3a',
+    } : null;
+    const spawnSafeRadius = 240;
     const bossOnlyRoomIds = new Set<number>([...(stageTwoBossFight ? exitRooms.map((room) => room.id) : []), ...(stageFourBossFight ? [arenaRoom.id] : [])]);
     const spawnPlatforms = [...terrain, ...oneWays].filter((platform) => {
       if (swampLayout && platform.x >= SWAMP_WORLD.width - 1100 && (platform.y === 2585 || platform.y === 3235)) return false;
@@ -1030,11 +1129,14 @@ export default function App() {
         if (currentTrial.modifier === 'empowered') { boss.hp *= 2; boss.maxHp *= 2; boss.patrolSpeed *= 1.2; }
       }
     }
-    // Keep the initial spawn area calm so the player cannot appear beside a regular enemy.
+    // Keep the whole approach to the initial spawn calm. Patrol paths are
+    // checked too, so an enemy cannot immediately walk into the safe area.
     for (let index = enemies.length - 1; index >= 0; index--) {
       const enemy = enemies[index];
       if (enemy.kind === 'boss' || enemy.kind === 'rightHand') continue;
-      const dx = enemy.x + enemy.w / 2 - (spawnX + 17);
+      const spawnCenterX = spawnX + 17;
+      const closestPatrolX = Math.max(enemy.left, Math.min(enemy.right, spawnCenterX));
+      const dx = closestPatrolX - spawnCenterX;
       const dy = enemy.y + enemy.h / 2 - (spawnY + 28);
       if (Math.hypot(dx, dy) < spawnSafeRadius) enemies.splice(index, 1);
     }
@@ -2230,6 +2332,7 @@ export default function App() {
         else if (hitWorld && p.kind === 'gear' && (p.bounces || 0) > 0) { p.x = previousX; p.y = previousY; p.bounces = (p.bounces || 0) - 1; p.vx *= -1; p.vy *= -1; }
         else if (hitWorld) p.life = 0;
         if (!hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, e)) { const longShot = runProgress.current.relics.includes('hunter_eye') && Math.abs(p.x - (p.originX ?? p.x)) >= 360; damageEnemy(e, p.damage * (longShot ? 1.5 : 1), Math.sign(p.vx), p.x); applyStatus(e, 'poisoned'); p.life = 0; }
+        if (!hitWorld && p.kind === 'grenade' && p.life > 0) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemy)) { p.x += p.w / 2; p.y += p.h / 2; p.life = 0; break; }
         if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'trapArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) { damagePlayer(p.damage, p.x); if (p.kind === 'poisonBurst') applyStatus(player, 'poisoned'); else if (p.kind === 'gear') applyStatus(player, 'electrified'); } p.life = 0; }
         if (p.kind === 'magicOrb' && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; burst(p.x, p.y, '#c084fc', 12); }
         if ((p.kind === 'wardenSkull' || p.kind === 'fallingRock') && overlap(p, player)) { damagePlayer(p.damage, p.x, p.owner); p.life = 0; burst(p.x, p.y, p.kind === 'wardenSkull' ? '#c084fc' : '#9ca3af', 14); }
@@ -2645,6 +2748,25 @@ export default function App() {
         const nearby = Math.abs(player.x + player.w / 2 - portal.x) < 76 && Math.abs(player.y + player.h - portal.y) < 72;
         drawTeleportPortal(ctx, portal, now, nearby, activePortalCount);
       }
+      if (entranceDoor) {
+        ctx.fillStyle = 'rgba(3,7,12,.9)';
+        ctx.fillRect(entranceDoor.x - 7, entranceDoor.y - 9, entranceDoor.w + 14, entranceDoor.h + 9);
+        ctx.strokeStyle = theme.accent; ctx.lineWidth = 3;
+        ctx.strokeRect(entranceDoor.x - 4, entranceDoor.y - 6, entranceDoor.w + 8, entranceDoor.h + 6);
+        ctx.fillStyle = theme.stone; ctx.fillRect(entranceDoor.x, entranceDoor.y, entranceDoor.w, entranceDoor.h);
+        ctx.fillStyle = theme.accent;
+        ctx.fillRect(entranceDoor.x + 8, entranceDoor.y + 12, entranceDoor.w - 16, 5);
+        ctx.fillRect(entranceDoor.x + 8, entranceDoor.y + 34, entranceDoor.w - 16, 5);
+        ctx.fillStyle = theme.flameCore;
+        ctx.fillRect(entranceDoor.x + (entranceDoor.side === 'left' ? entranceDoor.w - 11 : 7), entranceDoor.y + 35, 4, 4);
+      }
+      if (locationNpc) {
+        ctx.fillStyle = locationNpc.color; ctx.fillRect(locationNpc.x, locationNpc.y + 8, 34, 48);
+        ctx.fillStyle = '#cbd5e1'; ctx.fillRect(locationNpc.x + 4, locationNpc.y, 26, 17);
+        ctx.fillStyle = '#081018'; ctx.fillRect(locationNpc.x + 9, locationNpc.y + 7, 4, 3); ctx.fillRect(locationNpc.x + 21, locationNpc.y + 7, 4, 3);
+        ctx.fillStyle = theme.accent; ctx.font = 'bold 10px ui-sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(locationNpc.name, locationNpc.x + 17, locationNpc.y - 10); ctx.textAlign = 'start';
+      }
       for (const door of doors) {
         const locked = enemies.some((enemy) => (enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.dead && !enemy.dormant);
         const opening = activeDoor === door ? Math.max(0, door.opening / .55) : 1;
@@ -3044,7 +3166,7 @@ export default function App() {
         </section>
       </div>}
       {settingsOpen && <div className="fixed inset-0 z-[80] grid place-items-center bg-black/80 px-4 backdrop-blur-md"><section className="w-full max-w-2xl border border-cyan-300/25 bg-[#081116] p-6 shadow-[0_0_70px_rgba(34,211,238,.1)] md:p-8"><div className="flex items-start justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.35em] text-cyan-300">False Knight</p><h2 className="mt-2 text-3xl font-black uppercase">Настройки</h2></div><button onClick={() => setSettingsOpen(false)} className="border border-white/15 px-3 py-2 text-xs text-slate-400 hover:border-cyan-300/50">✕</button></div><div className="mt-7 grid gap-5"><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-xs font-black uppercase tracking-[.14em] ${settings.screenShake ? 'border-emerald-300/50 bg-emerald-300/10 text-emerald-200' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Вкл' : 'Выкл'}</span></button></div><div className="mt-7 border-t border-white/10 pt-5"><p className="text-[9px] font-black uppercase tracking-[.25em] text-slate-500">Управление</p><div className="mt-4 grid grid-cols-2 gap-2 text-[10px] text-slate-400 md:grid-cols-3">{[['WASD / стрелки','Движение'],['ЛКМ / J','Атака'],['S + ЛКМ в воздухе','Удар вниз'],['F','Лечение Душой'],['E','Действие'],['Shift / C','Перекат']].map(([key, action]) => <div key={key} className="border border-white/10 bg-black/25 p-3"><kbd className="font-black text-slate-100">{key}</kbd><span className="mt-1 block">{action}</span></div>)}</div></div></section></div>}
-      {ending && <div className="ending-overlay fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 overflow-y-auto bg-black px-6 py-10 text-center"><div className="ending-lore grid gap-3"><p className="ending-line text-lg text-slate-300 md:text-2xl">...Я искал Безумного Царя, чтобы спасти это королевство.</p><p className="ending-line text-lg text-slate-300 md:text-2xl" style={{ animationDelay: '3.5s' }}>Но я бежал от своего собственного отражения.</p><p className="ending-line text-2xl font-black text-amber-200 md:text-4xl" style={{ animationDelay: '7s' }}>Круг замкнулся.</p><p className="ending-line text-sm uppercase tracking-[.3em] text-slate-500" style={{ animationDelay: '10.5s' }}>Спасибо за игру в False Knight!</p></div><section className="ending-summary w-full max-w-lg border-y border-amber-300/25 bg-[#050608] px-7 py-7 shadow-[0_0_70px_rgba(251,146,60,.09)]"><h2 className="text-3xl font-black uppercase tracking-[.16em] text-amber-50 md:text-4xl">Конец забега</h2><div className="mx-auto mt-5 max-w-sm border-y border-white/10 py-4 text-xs text-slate-400"><p className="flex justify-between"><span>Осколков собрано:</span><b className="text-amber-200">{runProgress.current.shards} 💎</b></p></div><div className="mt-5 border border-amber-300/15 bg-amber-300/5 p-4 text-sm leading-6 text-slate-300"><p className="mb-2 text-[8px] font-black uppercase tracking-[.3em] text-amber-300">Летопись забега</p>{chronicleLoading ? 'Хронист записывает последние строки…' : chronicle}</div><button onClick={finishRunToMainMenu} className="ending-menu-button mt-6 border border-cyan-300/45 bg-cyan-300/10 px-7 py-4 text-xs font-black uppercase tracking-[.16em] text-cyan-50">Вернуться в главное меню</button></section></div>}
+      {ending && <div className="ending-overlay fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 overflow-y-auto bg-black px-6 py-10 text-center"><div className="ending-lore grid gap-3"><p className="ending-line text-lg text-slate-300 md:text-2xl">...Я искал Короля-Тирана, чтобы спасти это королевство.</p><p className="ending-line text-lg text-slate-300 md:text-2xl" style={{ animationDelay: '3.5s' }}>Но Король-Тиран — это я. Рыцарь всё это время бежал от собственного отражения.</p><p className="ending-line text-2xl font-black text-amber-200 md:text-4xl" style={{ animationDelay: '7s' }}>Круг замкнулся.</p><p className="ending-line text-sm uppercase tracking-[.3em] text-slate-500" style={{ animationDelay: '10.5s' }}>Спасибо за игру в False Knight!</p></div><section className="ending-summary w-full max-w-lg border-y border-amber-300/25 bg-[#050608] px-7 py-7 shadow-[0_0_70px_rgba(251,146,60,.09)]"><h2 className="text-3xl font-black uppercase tracking-[.16em] text-amber-50 md:text-4xl">Конец забега</h2><div className="mx-auto mt-5 max-w-sm border-y border-white/10 py-4 text-xs text-slate-400"><p className="flex justify-between"><span>Осколков собрано:</span><b className="text-amber-200">{runProgress.current.shards} 💎</b></p></div><div className="mt-5 border border-amber-300/15 bg-amber-300/5 p-4 text-sm leading-6 text-slate-300"><p className="mb-2 text-[8px] font-black uppercase tracking-[.3em] text-amber-300">Летопись забега</p>{chronicleLoading ? 'Хронист записывает последние строки…' : chronicle}</div><button onClick={finishRunToMainMenu} className="ending-menu-button mt-6 border border-cyan-300/45 bg-cyan-300/10 px-7 py-4 text-xs font-black uppercase tracking-[.16em] text-cyan-50">Вернуться в главное меню</button></section></div>}
       {shopOpen && <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[#07100f]/95 px-4 py-8 backdrop-blur-md">
         <div className="w-full max-w-6xl">
           <div className="mb-6 text-center"><p className="text-[10px] font-black uppercase tracking-[.45em] text-teal-300">Безопасная комната</p><h2 className="mt-2 text-3xl font-black uppercase md:text-5xl">Убежище торговцев</h2><p className="mt-3 text-sm text-slate-500">Осколки: <span className="font-black text-amber-200">{runProgress.current.shards}</span></p>{(chronicleLoading || chronicle) && <p className="mx-auto mt-4 max-w-2xl border-y border-amber-300/15 py-3 text-xs leading-5 text-amber-50/70">{chronicleLoading ? 'Хронист записывает пройденный путь…' : chronicle}</p>}</div>
@@ -3112,7 +3234,7 @@ export default function App() {
           {hud.message === 'ДВЕРИ ОТКРЫТЫ' && <div className="pointer-events-none absolute inset-x-0 top-24 flex justify-center"><div className="border border-teal-300/30 bg-[#071015]/85 px-6 py-3 text-center shadow-[0_0_35px_rgba(45,212,191,.16)]"><p className="text-sm font-black tracking-[.22em] text-teal-100 md:text-lg">ДВЕРИ ОТКРЫТЫ</p><p className="mt-1 text-[8px] uppercase tracking-[.25em] text-teal-300/60">Найдите дверь и нажмите E или ↑</p></div></div>}
           {!started && <div className="absolute inset-0 z-20 bg-[#0a1015]/95 px-5 py-5 text-center md:px-8 md:py-6">
             <div className="flex items-center justify-between gap-3"><nav className="flex flex-wrap gap-2"><button onClick={() => setMenuTab('play')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'play' ? 'border-teal-300/60 text-teal-200' : 'border-white/10 text-slate-500'}`}>Играть</button><button onClick={() => setMenuTab('saves')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'saves' ? 'border-teal-300/60 text-teal-200' : 'border-white/10 text-slate-500'}`}>Сохранения</button><button onClick={() => setMenuTab('achievements')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'achievements' ? 'border-amber-300/60 text-amber-200' : 'border-white/10 text-slate-500'}`}>Достижения</button><button onClick={() => setSettingsOpen(true)} className="border border-white/10 px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] text-slate-500 hover:border-cyan-300/50 hover:text-cyan-200">Настройки</button></nav><button onClick={() => session ? supabase.auth.signOut() : setShowAuth(true)} disabled={!authReady} className="border border-white/15 bg-black/30 px-3 py-2 text-[8px] font-black uppercase tracking-[.12em] text-slate-300 transition hover:border-teal-300/50 hover:text-teal-200 disabled:opacity-40">{session ? 'Выйти' : 'Войти'}</button></div>
-            {menuTab === 'play' ? <div className="grid h-[calc(100%-45px)] place-items-center"><div className="max-w-2xl"><h2 className="mb-4 text-4xl font-black uppercase tracking-tight md:text-6xl">False <span className="text-slate-500">Knight</span></h2><p className="mx-auto mb-7 max-w-xl text-sm leading-6 text-slate-400">Ты очнулся на самом дне проклятого Подземелья. Твои доспехи разбиты, а память стерта. Поднимись к вершине замка и собери силу павших.</p><div className="mx-auto grid max-w-xs gap-3"><button onClick={() => setMenuTab('saves')} className="border border-amber-300/60 bg-amber-300/10 px-8 py-3 text-xs font-black uppercase tracking-[.24em] text-amber-100 hover:bg-amber-300/20">Новая игра</button><button onClick={() => setMenuTab('saves')} disabled={!saveSlots.some(Boolean)} className="border border-white/15 px-8 py-3 text-xs font-bold uppercase tracking-[.24em] text-slate-300 disabled:cursor-not-allowed disabled:opacity-30">Продолжить</button></div></div></div> : menuTab === 'saves' ? <div className="mx-auto mt-5 max-w-5xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-teal-300">Выберите слот</p><div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">{saveSlots.map((save, index) => <section key={index} className={`border bg-black/25 p-4 text-left ${activeSaveSlot === index ? 'border-teal-300/60' : 'border-white/10'}`}><p className="text-[9px] font-black uppercase tracking-[.2em] text-slate-500">Слот {index + 1}</p>{save ? <><h3 className="mt-3 text-sm font-black">Stage {String(save.sector).padStart(2, '0')} — {LOCATION_NAMES[save.location]}</h3><p className="mt-2 text-[10px] leading-5 text-slate-500">Осколки: {save.progress.shards ?? save.progress.cells ?? 0}<br/>Маски: {save.progress.hp}/{save.progress.maxHp}<br/>{new Date(save.savedAt).toLocaleString('ru-RU')}</p><div className="mt-4 grid gap-2"><button onClick={() => loadGame(save, index)} className="border border-teal-300/40 py-2 text-[9px] font-bold uppercase text-teal-200">Продолжить</button><button onClick={() => deleteSave(index)} className="border border-rose-400/20 py-2 text-[8px] uppercase text-rose-300">Стереть</button></div></> : <><p className="my-6 text-xs text-slate-700">Пустой слот</p><button onClick={() => beginNewInSlot(index)} className="w-full border border-amber-300/40 py-2 text-[9px] font-bold uppercase text-amber-200">Начать игру</button></>}</section>)}</div></div> : <div className="mx-auto mt-7 max-w-3xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-amber-300">Достижения</p><div className="mt-5 grid gap-3 md:grid-cols-2">{[{title:'Первый шаг',done:saveSlots.some(Boolean),text:'Начать первый забег'},{title:'Восхождение',done:saveSlots.some((save) => (save?.sector || 0) >= 3),text:'Добраться до Clock Tower'},{title:'Коллекционер',done:saveSlots.some((save) => (save?.progress.shards || 0) >= 100),text:'Собрать 100 Осколков'},{title:'Возвращение',done:saveSlots.some((save) => save?.location === 'throne'),text:'Добраться до Тронного зала'}].map((achievement) => <div key={achievement.title} className={`border p-4 text-left ${achievement.done ? 'border-amber-300/40 bg-amber-300/10' : 'border-white/10 bg-black/20 opacity-45'}`}><b className="text-sm text-slate-100">{achievement.done ? '◆ ' : '◇ '}{achievement.title}</b><p className="mt-1 text-[10px] text-slate-500">{achievement.text}</p></div>)}</div></div>}
+            {menuTab === 'play' ? <div className="grid h-[calc(100%-45px)] place-items-center"><div className="max-w-2xl"><h2 className="mb-4 text-4xl font-black uppercase tracking-tight md:text-6xl">False <span className="text-slate-500">Knight</span></h2><p className="mx-auto mb-7 max-w-xl text-sm leading-6 text-slate-400">Ты — дух без памяти, скованный тяжёлыми стальными доспехами. Поднимись через заброшенные уровни замка, сокруши пятерых Лордов и узнай, почему тебя назвали Ложным Рыцарем.</p><div className="mx-auto grid max-w-xs gap-3"><button onClick={() => setMenuTab('saves')} className="border border-amber-300/60 bg-amber-300/10 px-8 py-3 text-xs font-black uppercase tracking-[.24em] text-amber-100 hover:bg-amber-300/20">Новая игра</button><button onClick={() => setMenuTab('saves')} disabled={!saveSlots.some(Boolean)} className="border border-white/15 px-8 py-3 text-xs font-bold uppercase tracking-[.24em] text-slate-300 disabled:cursor-not-allowed disabled:opacity-30">Продолжить</button></div></div></div> : menuTab === 'saves' ? <div className="mx-auto mt-5 max-w-5xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-teal-300">Выберите слот</p><div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">{saveSlots.map((save, index) => <section key={index} className={`border bg-black/25 p-4 text-left ${activeSaveSlot === index ? 'border-teal-300/60' : 'border-white/10'}`}><p className="text-[9px] font-black uppercase tracking-[.2em] text-slate-500">Слот {index + 1}</p>{save ? <><h3 className="mt-3 text-sm font-black">Stage {String(save.sector).padStart(2, '0')} — {LOCATION_NAMES[save.location]}</h3><p className="mt-2 text-[10px] leading-5 text-slate-500">Осколки: {save.progress.shards ?? save.progress.cells ?? 0}<br/>Маски: {save.progress.hp}/{save.progress.maxHp}<br/>{new Date(save.savedAt).toLocaleString('ru-RU')}</p><div className="mt-4 grid gap-2"><button onClick={() => loadGame(save, index)} className="border border-teal-300/40 py-2 text-[9px] font-bold uppercase text-teal-200">Продолжить</button><button onClick={() => deleteSave(index)} className="border border-rose-400/20 py-2 text-[8px] uppercase text-rose-300">Стереть</button></div></> : <><p className="my-6 text-xs text-slate-700">Пустой слот</p><button onClick={() => beginNewInSlot(index)} className="w-full border border-amber-300/40 py-2 text-[9px] font-bold uppercase text-amber-200">Начать игру</button></>}</section>)}</div></div> : <div className="mx-auto mt-7 max-w-3xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-amber-300">Достижения</p><div className="mt-5 grid gap-3 md:grid-cols-2">{[{title:'Первый шаг',done:saveSlots.some(Boolean),text:'Начать первый забег'},{title:'Восхождение',done:saveSlots.some((save) => (save?.sector || 0) >= 3),text:'Добраться до Clock Tower'},{title:'Коллекционер',done:saveSlots.some((save) => (save?.progress.shards || 0) >= 100),text:'Собрать 100 Осколков'},{title:'Возвращение',done:saveSlots.some((save) => save?.location === 'throne'),text:'Добраться до Тронного зала'}].map((achievement) => <div key={achievement.title} className={`border p-4 text-left ${achievement.done ? 'border-amber-300/40 bg-amber-300/10' : 'border-white/10 bg-black/20 opacity-45'}`}><b className="text-sm text-slate-100">{achievement.done ? '◆ ' : '◇ '}{achievement.title}</b><p className="mt-1 text-[10px] text-slate-500">{achievement.text}</p></div>)}</div></div>}
           </div>}
           {!started && choosingLoadout && <div className="absolute inset-0 z-30 grid place-items-center bg-[#071015]/95 px-5 text-center backdrop-blur-md"><div className="w-full max-w-2xl"><p className="text-[10px] font-black uppercase tracking-[.4em] text-teal-300">Подготовка к забегу</p><h2 className="mt-3 text-3xl font-black uppercase md:text-5xl">Выберите 2 оружия</h2><div className="mt-7 grid grid-cols-3 gap-3">{BASIC_WEAPONS.map((gear) => { const selected = startingWeapons.includes(gear.kind); return <button key={gear.kind} onClick={() => toggleStartingWeapon(gear.kind)} className={`relative grid aspect-square place-items-center border p-3 transition ${selected ? 'border-teal-300 bg-teal-300/10 shadow-[0_0_25px_rgba(45,212,191,.15)]' : 'border-white/10 bg-black/25 text-slate-500 hover:border-white/30'}`}><span className="text-4xl md:text-6xl">{gearIcons[gear.kind]}</span><span className="mt-2 text-[9px] font-black uppercase tracking-[.12em] md:text-xs">{gear.name}</span>{selected && <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center bg-teal-300 text-[10px] font-black text-slate-950">✓</span>}</button>})}</div><p className="mt-4 text-xs text-slate-500">Выбрано: {startingWeapons.length} / 2</p><div className="mt-6 flex justify-center gap-3"><button onClick={() => setChoosingLoadout(false)} className="border border-white/10 px-5 py-3 text-[9px] font-bold uppercase tracking-[.18em] text-slate-500">Назад</button><button onClick={startNewGame} disabled={startingWeapons.length !== 2} className="border border-teal-300/60 bg-teal-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-teal-100 disabled:cursor-not-allowed disabled:opacity-30">Начать забег</button></div></div></div>}
           {started && paused && !relicChoiceOpen.current && !mapOpen && <div className="absolute inset-0 z-20 grid place-items-center overflow-y-auto bg-[#05090d]/85 px-4 py-4 text-center backdrop-blur-sm">{pauseBestiaryOpen ? <div className="w-full max-w-6xl border-y border-red-300/30 bg-black/75 px-4 py-5 md:px-7"><div className="mb-4 flex items-end justify-between border-b border-white/10 pb-3 text-left"><div><p className="text-[9px] font-black uppercase tracking-[.32em] text-red-300/70">Игра приостановлена</p><h2 className="mt-1 text-2xl font-black uppercase md:text-3xl">Книга врагов и боссов</h2></div><button onClick={() => setPauseBestiaryOpen(false)} className="border border-white/15 px-4 py-2 text-[9px] font-black uppercase tracking-[.16em] text-slate-300 hover:border-red-300/50 hover:text-red-200">Назад</button></div><BestiaryBook progress={bestiaryProgress}/></div> : <div className="w-full max-w-lg border-y border-teal-300/30 bg-black/60 px-8 py-6"><p className="text-[10px] font-bold uppercase tracking-[.4em] text-teal-300">Игра приостановлена</p><h2 className="mt-2 text-3xl font-black uppercase tracking-tight">Пауза</h2><DailyChallengeCard challenge={dailyChallenge} progress={dailyProgress(dailyChallenge, summarizeRun())} loading={dailyLoading} completed={dailyReward.completedDate === dailyChallenge.date} streak={dailyReward.streak}/><div className="mt-5 grid gap-2"><button onClick={() => { pausedRef.current = false; setPaused(false); }} className="border border-teal-300/60 bg-teal-300/10 px-6 py-3 text-xs font-black uppercase tracking-[.22em] text-teal-100 hover:bg-teal-300/20">Продолжить</button><button onClick={() => setPauseBestiaryOpen(true)} className="border border-red-300/30 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-red-200 transition hover:border-red-300/60 hover:bg-red-300/10">Книга врагов и боссов</button><button onClick={() => setSettingsOpen(true)} className="border border-cyan-300/30 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-cyan-200 transition hover:border-cyan-300/60 hover:bg-cyan-300/10">Настройки</button><button onClick={returnToMainMenu} className="border border-white/15 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-slate-400 transition hover:border-rose-400/40 hover:text-rose-300">В главное меню</button></div><p className="mt-3 text-[9px] uppercase tracking-[.2em] text-slate-600">Esc — продолжить</p></div>}</div>}

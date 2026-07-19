@@ -1,4 +1,5 @@
-export const CASTLE_WORLD = { width: 4000, height: 3000 } as const;
+// Six enormous halls (3 x 2), each several times the area of a normal room.
+export const CASTLE_WORLD = { width: 5400, height: 2800 } as const;
 
 export type CastleRoom = { id: number; col: number; row: number; x: number; y: number; connections: Set<number> };
 export type CastleTorch = { x: number; y: number; phase: number };
@@ -16,7 +17,7 @@ export type CastleLevel = {
 };
 
 /** Decorative layout derived from the room grid, with mirrored left/right details. */
-export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: number): CastleLevel => {
+export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: number, columns: number): CastleLevel => {
   const torches: CastleTorch[] = [];
   const banners: CastleBanner[] = [];
   const arches: CastleArch[] = [];
@@ -26,17 +27,17 @@ export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: num
   for (const room of rooms) {
     const floor = room.y + roomH - 42;
     carpets.push({ x: room.x + 76, y: floor - 12, w: roomW - 152, h: 12 });
-    arches.push({ x: room.x + roomW / 2 - 118, y: room.y + 92, w: 236, h: 225 });
+    arches.push({ x: room.x + roomW / 2 - 210, y: room.y + 110, w: 420, h: Math.min(520, roomH * .48) });
     for (const side of [-1, 1]) {
-      torches.push({ x: room.x + roomW / 2 + side * 245, y: room.y + 235, phase: room.id * 1.7 + side });
+      torches.push({ x: room.x + roomW / 2 + side * 520, y: room.y + 310, phase: room.id * 1.7 + side });
       banners.push({
-        x: room.x + roomW / 2 + side * 155 - 34,
-        y: room.y + 104,
+        x: room.x + roomW / 2 + side * 360 - 34,
+        y: room.y + 140,
         color: (room.col + room.row) % 2 ? 'red' : 'blue',
         crest: side < 0 ? 'crown' : 'lion',
       });
     }
-    if (room.connections.has(room.id - 5)) staircases.push({ x: room.x + roomW / 2, y: room.y + 48, h: roomH - 96 });
+    if (room.connections.has(room.id - columns)) staircases.push({ x: room.x + roomW / 2, y: room.y + 48, h: roomH - 96 });
   }
   return { torches, banners, arches, carpets, staircases };
 };
