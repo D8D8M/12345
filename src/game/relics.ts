@@ -23,6 +23,17 @@ export const RELICS: readonly Relic[] = [
   { id: 'executioner_chain', icon: '⛓️', name: 'Цепь палача', description: 'Убийство на ранге S продлевает комбо на 2,5 секунды.' },
 ] as const;
 
+export const RELIC_SYNERGIES = [
+  { ids: ['powder_seal', 'berserker_sigil'] as const, name: 'Адская смесь', description: 'Гранаты взрываются на 25% шире и наносят на 35% больше урона.' },
+  { ids: ['frost_shard', 'wind_feather'] as const, name: 'Ледяной вихрь', description: 'Перекат сквозь врага замораживает его.' },
+  { ids: ['soul_lantern', 'vampire_fang'] as const, name: 'Жажда душ', description: 'Каждый десятый удар также полностью наполняет сосуд Души.' },
+  { ids: ['blood_charm', 'iron_oath'] as const, name: 'Кровавая клятва', description: 'Железная клятва при срабатывании восстанавливает одну маску.' },
+  { ids: ['hunter_eye', 'executioner_chain'] as const, name: 'Приговор охотника', description: 'Стрелы наносят ещё 25% урона.' },
+  { ids: ['mirror_shield', 'wind_feather'] as const, name: 'Зеркальный ветер', description: 'Идеальный блок мгновенно восстанавливает перекат.' },
+  { ids: ['shard_heart', 'frost_shard'] as const, name: 'Хрустальная зима', description: 'Замороженные противники оставляют дополнительные осколки.' },
+  { ids: ['blood_charm', 'berserker_sigil'] as const, name: 'Последний пульс', description: 'Лечение за убийства срабатывает каждые шесть убийств при низком здоровье.' },
+] as const;
+
 export const chooseRelics = (owned: readonly RelicId[], count = 3): Relic[] => {
   const available = RELICS.filter((relic) => !owned.includes(relic.id));
   return [...available].sort(() => Math.random() - .5).slice(0, count);

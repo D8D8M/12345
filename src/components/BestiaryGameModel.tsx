@@ -24,11 +24,11 @@ export function BestiaryGameModel({ entry }: { entry: BestiaryEntry }) {
       if (isEarlyEnemyVariant(entry.id)) {
         const size = earlyEnemySpriteSizes[entry.id];
         const scale = Math.min(5.2, 135 / size.h); ctx.scale(scale, scale); ctx.translate(0, -size.h / 2);
-        drawEarlyEnemy(ctx, { variant: entry.id, time, vx: 0, vy: 0, attack: 0, hurt: 0, blocked: 0, stunned: 0, defeated: false });
+        drawEarlyEnemy(ctx, { variant: entry.id, time, vx: 0, vy: 0, attack: 0, attackProgress: 0, hurt: 0, blocked: 0, stunned: 0, defeated: false });
       } else if (BOSSES.has(entry.id as UniqueBossVariant)) {
         const variant = entry.id as UniqueBossVariant, size = uniqueBossSpriteSizes[variant];
         const scale = Math.min(3.1, 160 / size.h); ctx.scale(scale, scale); ctx.translate(0, -size.h / 2);
-        drawUniqueBoss(ctx, variant, time, false, false);
+        drawUniqueBoss(ctx, variant, time, 0, false);
       }
       ctx.restore();
       ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '10px ui-sans-serif'; ctx.textAlign = 'center';

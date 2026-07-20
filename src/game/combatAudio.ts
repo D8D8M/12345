@@ -43,3 +43,19 @@ export function playCombatHit(volume: number, heavy = false) {
     oscillator.connect(gain).connect(audio.destination); oscillator.start(now); oscillator.stop(now + .14);
   } catch { /* Sound is optional. */ }
 }
+
+export function playUiSound(volume: number, kind: 'select' | 'door' | 'relic' | 'pickup') {
+  if (volume <= 0) return;
+  try {
+    const audio = getContext(), now = audio.currentTime;
+    const notes = kind === 'relic' ? [330, 494, 659] : kind === 'door' ? [92, 69] : kind === 'pickup' ? [294, 440] : [220];
+    notes.forEach((frequency, index) => {
+      const oscillator = audio.createOscillator(), gain = audio.createGain(), start = now + index * .055;
+      oscillator.type = kind === 'door' ? 'sawtooth' : kind === 'relic' ? 'sine' : 'triangle';
+      oscillator.frequency.setValueAtTime(frequency, start);
+      if (kind === 'door') oscillator.frequency.exponentialRampToValueAtTime(frequency * .55, start + .16);
+      gain.gain.setValueAtTime(.045 * volume / 100, start); gain.gain.exponentialRampToValueAtTime(.001, start + .2);
+      oscillator.connect(gain).connect(audio.destination); oscillator.start(start); oscillator.stop(start + .22);
+    });
+  } catch { /* Sound is optional. */ }
+}

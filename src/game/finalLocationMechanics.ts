@@ -1,7 +1,7 @@
 export type FinalBox = { x: number; y: number; w: number; h: number };
 
 export type CastleMirror = FinalBox & { pairId: number; facing: -1 | 1; phase: number };
-export type CrossbowStatue = FinalBox & { facing: -1 | 1; cooldown: number };
+export type CrossbowStatue = FinalBox & { facing: -1 | 1; cooldown: number; hp: number; maxHp: number; hurt: number; dead: boolean };
 export type ThroneColumn = FinalBox;
 
 type PalaceRoom = { id: number; col: number; row: number; x: number; y: number };
@@ -28,6 +28,7 @@ export const createCrossbowStatues = (rooms: PalaceRoom[], roomW: number, roomH:
   .map((room, index) => ({
     x: room.x + (index % 2 ? roomW - 82 : 26), y: room.y + roomH * .43,
     w: 56, h: 44, facing: index % 2 ? -1 : 1, cooldown: index % 2,
+    hp: 90, maxHp: 90, hurt: 0, dead: false,
   }));
 
 export const createThroneColumns = (ceilingY: number, floorY: number): ThroneColumn[] => [190, 390, 660, 860].map((x) => ({
@@ -51,6 +52,14 @@ export const drawCastleMirror = (ctx: CanvasRenderingContext2D, mirror: CastleMi
 export const drawCrossbowStatue = (ctx: CanvasRenderingContext2D, statue: CrossbowStatue) => {
   const centerX = statue.x + statue.w / 2, centerY = statue.y + statue.h / 2;
   ctx.save();
+  if (statue.dead) {
+    ctx.globalAlpha = .75;
+    ctx.fillStyle = '#24232a'; ctx.fillRect(statue.x - 3, statue.y + statue.h - 10, statue.w + 6, 16);
+    ctx.fillStyle = '#625b61'; ctx.fillRect(statue.x + 5, statue.y + statue.h - 17, 13, 8); ctx.fillRect(statue.x + 29, statue.y + statue.h - 14, 18, 6);
+    ctx.strokeStyle = '#887b68'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(statue.x + 12, statue.y + statue.h - 12); ctx.lineTo(statue.x + 47, statue.y + statue.h - 3); ctx.stroke();
+    ctx.restore(); return;
+  }
+  if (statue.hurt > 0) { ctx.shadowColor = '#fff7ed'; ctx.shadowBlur = 14; }
   // A broad bolted plate and triangular braces make this read as architecture,
   // not as an invulnerable humanoid enemy.
   ctx.fillStyle = '#292832'; ctx.fillRect(statue.x - 4, statue.y - 6, statue.w + 8, statue.h + 12);
@@ -63,6 +72,9 @@ export const drawCrossbowStatue = (ctx: CanvasRenderingContext2D, statue: Crossb
   ctx.strokeStyle = '#d6c5a6'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(18, -18); ctx.lineTo(44, 0); ctx.lineTo(18, 18); ctx.stroke();
   ctx.strokeStyle = '#887b68'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(18, -18); ctx.lineTo(18, 18); ctx.stroke();
   ctx.fillStyle = '#18171d'; ctx.fillRect(-9, 4, 12, 10); ctx.restore();
+  const healthWidth = statue.w + 8;
+  ctx.fillStyle = 'rgba(10,8,12,.9)'; ctx.fillRect(statue.x - 4, statue.y - 17, healthWidth, 6);
+  ctx.fillStyle = statue.hurt > 0 ? '#fff7ed' : '#ef4444'; ctx.fillRect(statue.x - 4, statue.y - 17, healthWidth * Math.max(0, statue.hp / statue.maxHp), 6);
 };
 
 export const drawThroneColumn = (ctx: CanvasRenderingContext2D, column: ThroneColumn) => {
