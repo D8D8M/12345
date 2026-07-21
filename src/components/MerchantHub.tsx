@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { drawPlayerCape, drawPlayerKnight } from '../game/drawPlayerKnight';
 import { drawPlayerSword } from '../game/drawCombatAnimations';
-import { drawParallaxBackground, type ParallaxLocation } from '../game/drawParallaxBackground';
+import { drawParallaxBackground, drawParallaxLayers, type ParallaxLocation } from '../game/drawParallaxBackground';
 
 type StationId = 'forge' | 'alchemist' | 'weapons' | 'evolution';
 
@@ -18,33 +18,23 @@ type Props = {
 
 function HubBackdrop({ location }: { location: Props['origin'] }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const images: Partial<Record<Props['origin'], string>> = {
-    prison: '/hub-backgrounds/location-1.png',
-    swamps: '/hub-backgrounds/location-2.png',
-    mines: '/hub-backgrounds/location-3.png',
-    clock: '/hub-backgrounds/location-4.png',
-    crypt: '/hub-backgrounds/location-5.png',
-    bridge: '/hub-backgrounds/location-6.png',
-  };
   useEffect(() => {
     const canvas = ref.current; if (!canvas) return;
     const draw = () => {
       const ratio = Math.min(2, window.devicePixelRatio || 1); canvas.width = innerWidth * ratio; canvas.height = innerHeight * ratio;
       const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.scale(ratio, ratio);
-      const w = innerWidth, h = innerHeight; drawParallaxBackground(ctx, location as ParallaxLocation, w, h);
-      if (location === 'prison') for (const x of [90, w * .37, w * .68, w - 190]) { ctx.fillStyle = '#071116'; ctx.fillRect(x, 55, 145, 175); ctx.strokeStyle = '#52666a'; ctx.lineWidth = 8; ctx.strokeRect(x, 55, 145, 175); for (let bar = 1; bar < 5; bar++) { ctx.fillStyle = '#43565a'; ctx.fillRect(x + bar * 28, 60, 7, 165); } }
-      if (location === 'swamps') for (let x = -40; x < w + 100; x += 145) { ctx.fillStyle = '#0b2118'; ctx.fillRect(x + 54, h * .28, 25, h); ctx.beginPath(); ctx.ellipse(x + 65, h * .23, 105, 58, 0, 0, Math.PI * 2); ctx.fill(); }
-      if (location === 'mines') for (let x = 90; x < w; x += 330) { ctx.fillStyle = '#5a321d'; ctx.fillRect(x, 0, 19, h); ctx.fillStyle = '#1d120d'; for (let y = 70; y < h; y += 150) ctx.fillRect(x - 7, y, 33, 7); }
-      if (location === 'clock') { ctx.fillStyle = '#3b2119'; for (let y = 0; y < h; y += 34) for (let x = -(y % 68); x < w; x += 92) ctx.fillRect(x, y, 86, 28); for (const [x,y,r] of [[w*.2,h*.25,58],[w*.63,h*.16,78],[w*.52,h*.62,50],[w*.82,h*.72,70]] as const) { ctx.strokeStyle='#111317aa'; ctx.lineWidth=14; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); } }
-      if (location === 'crypt') { ctx.fillStyle = '#20154a77'; for (let x = 80; x < w; x += 290) ctx.fillRect(x, 0, 72, h); ctx.fillStyle='#050714aa'; for (let x=240;x<w;x+=430) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+70,150); ctx.lineTo(x+130,0); ctx.fill(); } }
-      if (location === 'bridge') { const sky=ctx.createLinearGradient(0,0,0,h); sky.addColorStop(0,'#96919d'); sky.addColorStop(.48,'#d59270'); sky.addColorStop(1,'#d9a669'); ctx.fillStyle=sky; ctx.fillRect(0,0,w,h); ctx.fillStyle='#252936'; for(let x=-100;x<w;x+=190){ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(x+100,h*.48);ctx.lineTo(x+230,h);ctx.fill();} }
-      if (location === 'castle') { ctx.fillStyle='#4b382d'; for(let y=0;y<h;y+=52) for(let x=-(y%104);x<w;x+=130) ctx.fillRect(x,y,122,45); for(const x of [w*.16,w*.48,w*.8]) { ctx.fillStyle='#781f2b'; ctx.fillRect(x-38,65,76,190); ctx.fillStyle='#d4af55'; ctx.fillRect(x-42,65,84,8); ctx.beginPath(); ctx.arc(x,145,22,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#4b1019'; ctx.font='bold 28px serif'; ctx.textAlign='center'; ctx.fillText('♛',x,155); } for(const x of [w*.08,w*.32,w*.64,w*.92]) { const y=h*.43; ctx.fillStyle='#661925'; ctx.fillRect(x-25,y,50,112); ctx.fillStyle='#d4af55'; ctx.fillRect(x-29,y,58,6); ctx.beginPath(); ctx.arc(x,y+48,15,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#4b1019'; ctx.font='bold 19px serif'; ctx.textAlign='center'; ctx.fillText('♛',x,y+55); } }
-      ctx.fillStyle = location === 'bridge' ? '#30343d' : location === 'swamps' ? '#17261a' : location === 'castle' ? '#332820' : '#10191d'; ctx.fillRect(0, h * .73, w, h * .27); ctx.fillStyle = location === 'castle' ? '#d4af55' : '#48635a'; ctx.fillRect(0, h * .73, w, 6);
+      const w = innerWidth, h = innerHeight;
+      drawParallaxBackground(ctx, location as ParallaxLocation, w, h);
+      if (location !== 'castle') {
+        drawParallaxLayers(ctx, location as ParallaxLocation, w, h, 0, 0);
+        return;
+      }
+      ctx.fillStyle='#4b382d'; for(let y=0;y<h;y+=52) for(let x=-(y%104);x<w;x+=130) ctx.fillRect(x,y,122,45); for(const x of [w*.16,w*.48,w*.8]) { ctx.fillStyle='#781f2b'; ctx.fillRect(x-38,65,76,190); ctx.fillStyle='#d4af55'; ctx.fillRect(x-42,65,84,8); ctx.beginPath(); ctx.arc(x,145,22,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#4b1019'; ctx.font='bold 28px serif'; ctx.textAlign='center'; ctx.fillText('♛',x,155); } for(const x of [w*.08,w*.32,w*.64,w*.92]) { const y=h*.43; ctx.fillStyle='#661925'; ctx.fillRect(x-25,y,50,112); ctx.fillStyle='#d4af55'; ctx.fillRect(x-29,y,58,6); ctx.beginPath(); ctx.arc(x,y+48,15,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#4b1019'; ctx.font='bold 19px serif'; ctx.textAlign='center'; ctx.fillText('♛',x,y+55); }
+      ctx.fillStyle='#332820'; ctx.fillRect(0,h*.73,w,h*.27); ctx.fillStyle='#d4af55'; ctx.fillRect(0,h*.73,w,6);
     };
     draw(); window.addEventListener('resize', draw); return () => window.removeEventListener('resize', draw);
   }, [location]);
-  const image = images[location];
-  return image ? <img src={image} className="hub-rendered-backdrop" alt=""/> : <canvas ref={ref} className="hub-rendered-backdrop"/>;
+  return <canvas ref={ref} className="hub-rendered-backdrop"/>;
 }
 
 function HubKnight({ moving, rolling, attacking, facing }: { moving: boolean; rolling: boolean; attacking: boolean; facing: -1 | 1 }) {
