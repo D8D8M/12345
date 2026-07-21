@@ -215,7 +215,7 @@ section.aspect-video > div.absolute.inset-0.z-20 > div.grid > div.max-w-2xl > p:
 @media(prefers-reduced-motion:reduce){.dead-menu-clouds,.dead-menu-mist,.dead-menu-sea::after,.environment-particles i{animation:none}.environment-particles{display:none}.dead-menu *{transition-duration:.01ms!important}}
 /* Merchant refuge between combat locations. */
 .merchant-hub-exact { background-position:center; background-size:cover; background-repeat:no-repeat; }
-.hub-rendered-backdrop { position:absolute; inset:0; z-index:0; width:100%; height:100%; object-fit:cover; }
+.hub-rendered-backdrop { position:absolute; inset:0; z-index:0; width:100%; height:100%; object-fit:contain; object-position:center center; background:#070b0d; }
 .merchant-hub-exact .merchant-hub-sky,.merchant-hub-exact .merchant-hub-stonework,.merchant-hub-exact .merchant-hub-arches,.merchant-hub-exact .hub-upper-walkway,.merchant-hub-exact .hub-back-door,.merchant-hub-exact .hub-wood-beam,.merchant-hub-exact .hub-biome-decor,.merchant-hub-exact .hub-torch { display:none; }
 .merchant-hub-exact::after { content:""; position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(180deg,transparent 68%,#02070a44 73%); }
 .hub-clean-wall { display:none; }

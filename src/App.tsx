@@ -2183,6 +2183,16 @@ export default function App() {
           }
         }
         if (cryptLevel) for (const slab of cryptLevel.crumblingSlabs) {
+          const sealsBossArena = stageFourArenaLocked
+            && slab.x < arenaGates[0].x
+            && slab.x + slab.w > arenaRoom.x
+            && slab.y >= arenaRoom.y
+            && slab.y <= arenaRoom.y + roomH;
+          if (sealsBossArena) {
+            slab.state = 'stable';
+            slab.timer = 0;
+            continue;
+          }
           if (slab.state === 'stable' && player.grounded && player.x + player.w > slab.x && player.x < slab.x + slab.w && Math.abs(player.y + player.h - slab.y) < 4) { slab.state = 'cracking'; slab.timer = 1; }
           if (slab.state === 'cracking') { slab.timer -= dt; if (slab.timer <= 0) { slab.state = 'fallen'; const index = solids.indexOf(slab); if (index >= 0) solids.splice(index, 1); const blocker = projectileBlockers.indexOf(slab); if (blocker >= 0) projectileBlockers.splice(blocker, 1); shake = 9; burst(slab.x + slab.w / 2, slab.y, '#776b82', 24); } }
         }
