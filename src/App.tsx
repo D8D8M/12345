@@ -74,6 +74,7 @@ type SectorTheme = { name: string; subtitle: string; center: string; middle: str
 type RunStats = { startedAt: number; kills: number; damageTaken: number; bossesDefeated: number; deathCause?: string };
 type DeathSummary = RunStats & { seconds: number; shards: number; location: LocationKind; sector: number; relics: RelicId[] };
 type CombatNotice = { id: number; text: string; tone: 'danger' | 'parry' | 'cooldown' };
+type TutorialProgress = { left: boolean; right: boolean; jump: boolean; doubleJump: boolean; drop: boolean; map: boolean; hideAll: boolean };
 
 const LOCATIONS: readonly LocationKind[] = ['prison', 'swamps', 'mines', 'clock', 'crypt', 'bridge', 'castle', 'throne'];
 const isLocationKind = (value: unknown): value is LocationKind => typeof value === 'string' && LOCATIONS.includes(value as LocationKind);
@@ -233,6 +234,8 @@ export default function App() {
   const [runKey, setRunKey] = useState(0);
   const [sector, setSector] = useState(1);
   const [location, setLocation] = useState<LocationKind>('prison');
+  const [tutorialActive, setTutorialActive] = useState(false);
+  const tutorialProgress = useRef<TutorialProgress>({ left: false, right: false, jump: false, doubleJump: false, drop: false, map: false, hideAll: false });
   const [storyMessage, setStoryMessage] = useState('');
   const [deathQuote, setDeathQuote] = useState(DEATH_QUOTES[0]);
   const [deathAdvice, setDeathAdvice] = useState('');
@@ -268,7 +271,6 @@ export default function App() {
   const [cloudSaveStatus, setCloudSaveStatus] = useState<'local' | 'syncing' | 'synced' | 'error'>('local');
   const [activeSaveSlot, setActiveSaveSlot] = useState<number | null>(null);
   const [, setAutosave] = useState<SavedGame | null>(loadAutosave);
-  const [choosingLoadout, setChoosingLoadout] = useState(false);
   const [choosingMode, setChoosingMode] = useState(false);
   const [runMode, setRunMode] = useState<RunMode>('normal');
   const [bossTrial, setBossTrial] = useState<BossTrial | null>(null);
@@ -279,7 +281,6 @@ export default function App() {
   const timedGhostFrames = useRef<GhostFrame[]>([]);
   const savedRecordForRun = useRef(false);
   const [elapsedHud, setElapsedHud] = useState(0);
-  const [startingWeapons, setStartingWeapons] = useState<GearKind[]>(['sword', 'bow']);
   const [weaponReplacement, setWeaponReplacement] = useState<WeaponReplacement | null>(null);
   const weaponReplacementOpen = useRef(false);
   const dropReplacedWeapon = useRef<(gear: Gear) => void>(() => {});
@@ -557,7 +558,7 @@ export default function App() {
     const ROOM_ROWS = throneScene || swampLayout || bridgeLayout ? 1 : castleLayout || prisonLayout ? 2 : clockLayout ? 8 : mineLayout ? 3 : 5;
     const roomW = throneScene ? 2100 : castleLayout ? CASTLE_WORLD.width / ROOM_COLS : bridgeLayout ? BRIDGE_WORLD.width / ROOM_COLS : clockLayout ? CLOCK_TOWER_WORLD.width : swampLayout ? 700 : mineLayout ? MINES_WORLD.width / ROOM_COLS : prisonLayout ? 760 : cryptLayout ? CRYPT_WORLD.width / ROOM_COLS : 820;
     const roomH = throneScene ? 820 : castleLayout ? CASTLE_WORLD.height / ROOM_ROWS : bridgeLayout ? BRIDGE_WORLD.height : clockLayout ? CLOCK_TOWER_WORLD.height / ROOM_ROWS : swampLayout ? SWAMP_WORLD.height : mineLayout ? MINES_WORLD.height / ROOM_ROWS : prisonLayout ? 680 : cryptLayout ? CRYPT_WORLD.height / ROOM_ROWS : 620, roomMargin = prisonLayout || swampLayout || mineLayout || clockLayout || cryptLayout || bridgeLayout || castleLayout ? 0 : 60;
-    const initialRoomId = castleLayout ? ROOM_COLS * (ROOM_ROWS - 1) + Math.floor(ROOM_COLS / 2) : clockLayout ? ROOM_ROWS - 1 : throneScene || cryptLayout || swampLayout || bridgeLayout ? 0 : ROOM_COLS;
+    const initialRoomId = tutorialActive ? ROOM_COLS : castleLayout ? ROOM_COLS * (ROOM_ROWS - 1) + Math.floor(ROOM_COLS / 2) : clockLayout ? ROOM_ROWS - 1 : throneScene || cryptLayout || swampLayout || bridgeLayout ? 0 : ROOM_COLS;
     const worldW = roomMargin * 2 + ROOM_COLS * roomW, worldH = roomMargin * 2 + ROOM_ROWS * roomH;
     const groundY = 620, lowerGroundY = 1420, deepGroundY = 2100;
     const layout = (sector - 1) % 3;
@@ -661,7 +662,13 @@ export default function App() {
       if (!available.length) { mazeStack.pop(); continue; }
       const next = available[0]; current.connections.add(next); rooms[next].connections.add(current.id); mazeVisited.add(next); mazeStack.push(next);
     }
-    if (prisonLayout) {
+    if (tutorialActive) {
+      // A readable training route: right along the lower corridor, up through
+      // a platform shaft, then right to the combat room and exit.
+      for (const room of rooms) room.connections.clear();
+      const connect = (from: number, to: number) => { rooms[from].connections.add(to); rooms[to].connections.add(from); };
+      connect(3, 4); connect(4, 1); connect(1, 2);
+    } else if (prisonLayout) {
       // Hand-authored 3x2 dungeon: horizontal corridors carry the main route,
       // while two hatch links create dead-end branches and a loop between floors.
       for (const room of rooms) room.connections.clear();
@@ -790,6 +797,32 @@ export default function App() {
     const minesLevel = mineLayout ? createMinesLevel(rooms.map((room) => ({ ...room, w: roomW, h: roomH })), ROOM_COLS) : null;
     if (minesLevel) { oneWays.push(...minesLevel.platforms); dividers.push(...minesLevel.obstacles); }
     const castleLevel = castleLayout ? createCastleLevel(rooms, roomW, roomH, ROOM_COLS) : null;
+    if (tutorialActive) {
+      // One narrow, hand-authored route: a low corridor, a climbing shaft and
+      // a second low corridor leading to the prisoner and the exit door. The
+      // large rectangles fill every part of the map outside that route.
+      terrain.splice(0, terrain.length,
+        { x: 0, y: 1318, w: worldW, h: worldH - 1318 },
+        { x: 1100, y: 638, w: worldW - 1100, h: 42 },
+      );
+      ceilings.splice(0, ceilings.length,
+        { x: 0, y: 0, w: worldW, h: 300 },
+      );
+      dividers.splice(0, dividers.length,
+        { x: 0, y: 300, w: 700, h: 780 },
+        { x: 1100, y: 680, w: worldW - 1100, h: 638 },
+        // Stone lintel above the training-room iron grate.
+        { x: 1478, y: 300, w: 42, h: 220 },
+        { x: worldW - 42, y: 300, w: 42, h: 380 },
+      );
+      oneWays.splice(0, oneWays.length,
+        { x: 770, y: 1165, w: 165, h: 14 },
+        { x: 925, y: 1030, w: 165, h: 14 },
+        { x: 760, y: 895, w: 165, h: 14 },
+        { x: 925, y: 760, w: 165, h: 14 },
+        { x: 780, y: 625, w: 175, h: 14 },
+      );
+    }
     const platformBlockingSolids: Box[] = [...terrain, ...ceilings, ...dividers];
     const platformsToPlace = clockLevel
       ? oneWays.filter((platform) => !clockLevel.exitPlatforms.includes(platform as ClockPlatform))
@@ -800,7 +833,7 @@ export default function App() {
     // the neighbouring floor slabs are thick, making the room above
     // unreachable. Restore a narrow, centred take-off ledge for every upward
     // connection; it fits completely inside the 132px opening.
-    if (!swampLayout && !clockLayout && !cryptLayout && !bridgeLayout && !throneScene) {
+    if (!tutorialActive && !swampLayout && !clockLayout && !cryptLayout && !bridgeLayout && !throneScene) {
       const openingPlatformWidth = 96;
       for (const room of rooms) if (room.connections.has(room.id - ROOM_COLS)) {
         oneWays.push({
@@ -815,7 +848,7 @@ export default function App() {
     // template happens to sit too close to a wall. Keep one conservative first
     // step in every grid room so the platform route can always be started from
     // its floor (well within the player's double-jump height).
-    if (!swampLayout && !clockLayout && !cryptLayout && !bridgeLayout && !throneScene) {
+    if (!tutorialActive && !swampLayout && !clockLayout && !cryptLayout && !bridgeLayout && !throneScene) {
       const reachableRise = 220;
       const fallbackWidth = 150;
       for (const room of rooms) {
@@ -892,7 +925,7 @@ export default function App() {
     type Trap = Box & { life: number; damage: number; triggered: boolean };
     type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number; maxLife?: number; shape?: 'square' | 'smoke' | 'shard'; rotation?: number; spin?: number };
     type Explosion = { x: number; y: number; life: number; maxLife: number; radius: number; kind: 'fire' | 'freeze' };
-    type Door = Box & { opening: number; destination: Exclude<LocationKind, 'prison'>; label: string };
+    type Door = Box & { opening: number; destination: LocationKind; label: string };
     type PowerUp = Box & { kind: 'health'; collected: boolean; phase: number };
     type Loot = Box & { gear: Gear; collected: boolean; phase: number; shardValue: number };
     type ExplorationReward = Box & {
@@ -907,7 +940,9 @@ export default function App() {
     // Roll once per level creation and reuse the result for the player, the
     // start room and the entrance door. This prevents those three objects from
     // drifting to different sides after a randomized edge spawn.
-    const spawnEdge: SpawnEdge = prisonLayout || mineLayout
+    const spawnEdge: SpawnEdge = tutorialActive
+      ? 'left'
+      : prisonLayout || mineLayout
       ? (Math.random() < .5 ? 'left' : 'right')
       : swampLayout
       ? 'left'
@@ -939,10 +974,10 @@ export default function App() {
       return 0;
     };
     // Exits are selected by travel distance, not by a prescribed edge or corner.
-    const exitSide = (_room: Room) => true;
+    const exitSide = (room: Room) => Number.isFinite(roomDistance[room.id]);
     const deadEndRooms = rooms.filter((room) => room.connections.size === 1 && room.id !== startRoomId && exitSide(room)).sort(byDistance);
     const distantRooms = rooms.filter((room) => room.id !== startRoomId && exitSide(room) && !deadEndRooms.includes(room)).sort(byDistance);
-    const routeDestinations: Array<Exclude<LocationKind, 'prison'>> = location === 'prison' ? ['swamps', 'mines'] : location === 'swamps' ? ['clock'] : location === 'mines' ? ['clock', 'clock'] : location === 'clock' ? ['crypt', 'bridge'] : location === 'crypt' ? ['castle', 'castle'] : location === 'bridge' ? ['castle'] : location === 'castle' ? ['throne', 'throne'] : [];
+    const routeDestinations: LocationKind[] = tutorialActive ? ['prison'] : location === 'prison' ? ['swamps', 'mines'] : location === 'swamps' ? ['clock'] : location === 'mines' ? ['clock', 'clock'] : location === 'clock' ? ['crypt', 'bridge'] : location === 'crypt' ? ['castle', 'castle'] : location === 'bridge' ? ['castle'] : location === 'castle' ? ['throne', 'throne'] : [];
     const exitCandidates = [...deadEndRooms, ...distantRooms];
     const farthestDistance = exitCandidates.reduce((maximum, room) => Math.max(maximum, roomDistance[room.id]), 0);
     // Keep exits in the farthest band of the map: at most one room transition
@@ -1163,6 +1198,20 @@ export default function App() {
       const speed = variant === 'rottenPrisoner' ? 42 : variant === 'blindMiner' ? 105 : variant === 'clockworkSoldier' ? 125 : variant === 'royalGuard' ? 105 : kind === 'shield' ? 32 : kind === 'bomber' ? 28 : kind === 'slime' ? 55 : 0;
       return [{ kind, variant, name, x, y: spawnY, w, h, vx: speed * (Math.random() < .5 ? -1 : 1), vy: 0, patrolSpeed: speed, hp, maxHp: hp, left, right, homeY: spawnY, facing: 1, alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0, attack: 0, cooldown: .5 + Math.random(), blocked: 0, stunned: 0, guardTriggered: false, defeated: false, dead: false, elite, eliteCooldown: elite === 'teleporter' ? 2.2 + Math.random() * 1.8 : undefined }];
     });
+    if (tutorialActive) {
+      const combatRoom = rooms[2];
+      const w = earlyEnemySizes.rottenPrisoner.w, h = earlyEnemySizes.rottenPrisoner.h;
+      const floorY = combatRoom.y + roomH - wall;
+      enemies.splice(0, enemies.length, {
+        kind: 'zombie', variant: 'rottenPrisoner', name: 'Гнилой узник',
+        x: combatRoom.x + 260, y: floorY - h, w, h, vx: -42, vy: 0,
+        patrolSpeed: 42, hp: 42, maxHp: 42, left: combatRoom.x + wall + 80,
+        right: combatRoom.x + roomW - wall - 120, homeY: floorY - h, facing: -1,
+        alert: 0, alertTimer: 0, sawPlayer: false, turnDelay: 0, hurt: 0,
+        attack: 0, cooldown: .8, blocked: 0, stunned: 0, guardTriggered: false,
+        defeated: false, dead: false,
+      });
+    }
     const bossLocation = location === 'swamps' || location === 'mines';
     if (bossLocation) {
       const bossRoom = exitRooms[0] || rooms[rooms.length - 1], kind: EnemyKind = 'boss';
@@ -1242,13 +1291,13 @@ export default function App() {
     const royalArmor = { x: throne.x - 150, y: startRoom.y + roomH - wall - 74, w: 45, h: 74 };
     const checkpoint = { x: player.x, y: player.y };
     let hazardRespawn = { ...checkpoint };
-    const teleportPortals = location === 'throne' || location === 'castle' ? [] : createTeleportPortals(rooms, [...terrain, ...oneWays], startRoomId, exitRooms[0]?.id, roomDistance, roomW, roomH);
+    const teleportPortals = location === 'throne' || location === 'castle' || tutorialActive ? [] : createTeleportPortals(rooms, [...terrain, ...oneWays], startRoomId, exitRooms[0]?.id, roomDistance, roomW, roomH);
     const stageTwoRewardPlatforms = location === 'swamps'
       ? swampPlatforms.filter(({ route }) => route === 'main').sort((a, b) => a.y - b.y || b.w - a.w)
       : location === 'mines'
       ? [...oneWays].sort((a, b) => a.y - b.y || b.w - a.w)
       : [];
-    const powerUpPlatforms = location === 'throne' ? [] : (stageTwoRewardPlatforms.length
+    const powerUpPlatforms = location === 'throne' || tutorialActive ? [] : (stageTwoRewardPlatforms.length
       ? stageTwoRewardPlatforms.slice(0, 1)
       : [...terrain, ...oneWays].sort(() => Math.random() - .5).slice(0, 1));
     const powerUps: PowerUp[] = powerUpPlatforms.map((platform) => ({ x: platform.x + 25 + Math.random() * Math.max(1, platform.w - 70), y: platform.y - 28, w: 24, h: 24, kind: 'health', collected: false, phase: Math.random() * Math.PI * 2 }));
@@ -1260,7 +1309,7 @@ export default function App() {
       { kind: 'freeze', equipmentId: 'ice_bomb', name: 'Ледяная бомба', tier: sector, damage: 24 + sector * 4, cooldown: 6 },
       { kind: 'trap', equipmentId: 'toothed_trap', name: 'Зубастый капкан', tier: sector, damage: 38 + sector * 5, cooldown: 8 },
     ];
-    const sectorLoot = location === 'throne' ? [] : [...lootTemplates].sort(() => Math.random() - .5).slice(0, 2);
+    const sectorLoot = location === 'throne' || tutorialActive ? [] : [...lootTemplates].sort(() => Math.random() - .5).slice(0, 2);
     const deadEndRewardRooms = deadEndRooms.filter((room) => !exitRoomIds.has(room.id));
     const deadEndPlatforms = deadEndRewardRooms.flatMap((room) => [...terrain, ...oneWays]
       .filter((platform) => platform.x >= room.x + wall && platform.x + platform.w <= room.x + roomW - wall && platform.y > room.y + wall && platform.y <= room.y + roomH - wall)
@@ -1270,12 +1319,19 @@ export default function App() {
       .filter((platform, index, all) => all.indexOf(platform) === index)
       .slice(0, sectorLoot.length);
     const loot: Loot[] = sectorLoot.map((gear, index) => ({ x: lootPlatforms[index].x + lootPlatforms[index].w / 2 - 13, y: lootPlatforms[index].y - 30, w: 26, h: 26, gear, collected: false, phase: Math.random() * Math.PI * 2, shardValue: 8 + sector * 2 }));
+    if (tutorialActive) {
+      const trainingWeapons = [BASIC_WEAPONS[0], BASIC_WEAPONS[2], BASIC_WEAPONS[1]];
+      loot.push(...trainingWeapons.map((gear, index): Loot => ({
+        x: 1190 + index * 105, y: 608, w: 26, h: 26,
+        gear: { ...gear }, collected: false, phase: index * 1.7, shardValue: 0,
+      })));
+    }
     const eventPlatforms = deadEndRewardRooms.flatMap((room) => [...terrain, ...oneWays].filter((platform) =>
       platform.x >= room.x + wall && platform.x + platform.w <= room.x + roomW - wall
       && platform.y > room.y + wall && platform.y <= room.y + roomH - wall
       && platform.w >= 90 && !lootPlatforms.includes(platform)))
       .sort(() => Math.random() - .5);
-    const roomEvents = location === 'throne' ? [] : createRoomEvents(eventPlatforms, sector);
+    const roomEvents = location === 'throne' || tutorialActive ? [] : createRoomEvents(eventPlatforms, sector);
     dropReplacedWeapon.current = (gear) => {
       loot.push({
         x: player.x + player.w / 2 - 13,
@@ -1808,6 +1864,7 @@ export default function App() {
       shake = 9; flash = .15; burst(player.x + 17, player.y + 25, '#7f1d1d', 18); burst(player.x + 17, player.y + 25, '#1f1723', 10);
       if (player.hp <= 0) {
         player.hp = 0; player.soul = 0; setSoulHud(0); player.dead = true; player.vy = -380;
+        if (tutorialActive) tutorialProgress.current.hideAll = true;
         const cause = meleeAttacker?.name || (ignoreGuard ? 'опасность окружения' : 'дальний удар');
         runStats.current.deathCause = cause; setDeathQuote(DEATH_QUOTES[Math.floor(Math.random() * DEATH_QUOTES.length)]);
         setDeathSummary({ ...runStats.current, seconds: Math.floor(runElapsed.current), shards, location, sector, relics: [...runProgress.current.relics] });
@@ -1907,6 +1964,7 @@ export default function App() {
         return;
       }
       runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0);
+      if (tutorialActive) runProgress.current.loadout = Array.from({ length: 4 }, () => ({ kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 })) as [Gear, Gear, Gear, Gear];
       setHud({ hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
       setLocation('prison'); setSector(1); setRunKey((n) => n + 1);
     };
@@ -1916,6 +1974,7 @@ export default function App() {
         e.preventDefault();
         if (weaponReplacementOpen.current || bossDeathLineOpen.current || settingsOpenRef.current) return;
         const nextOpen = !mapOpenRef.current;
+        if (tutorialActive && nextOpen) tutorialProgress.current.map = true;
         if (nextOpen) saveMapSnapshot();
         mapOpenRef.current = nextOpen; setMapOpen(nextOpen); setMapArchive({ ...runProgress.current.mapArchive });
         pausedRef.current = nextOpen; setPaused(nextOpen); keys.clear(); pressed.clear();
@@ -2096,6 +2155,10 @@ export default function App() {
       if (holdingShield) { const gear = runProgress.current.loadout[selectedSlot.current]; const config = equipmentConfig(gear.equipmentId, 'shield'); player.guard = 1; player.guardAge += dt; player.vx *= Math.max(0, 1 - dt * (config.kind === 'shield' ? config.movementDamping : 8)); }
       else { player.guard = 0; player.guardAge = 0; }
       const left = keys.has(settingsRef.current.bindings.left), right = keys.has(settingsRef.current.bindings.right);
+      if (tutorialActive) {
+        if (left) tutorialProgress.current.left = true;
+        if (right) tutorialProgress.current.right = true;
+      }
       if (noClipModeRef.current) {
         const up = keys.has(settingsRef.current.bindings.up), down = keys.has(settingsRef.current.bindings.down);
         const horizontal = Number(right) - Number(left), vertical = Number(down) - Number(up), length = Math.max(1, Math.hypot(horizontal, vertical));
@@ -2109,8 +2172,16 @@ export default function App() {
       }
       if (!noClipModeRef.current && !focusing && !controlsLocked && tap(settingsRef.current.bindings.roll) && player.rollCd <= 0) { player.roll = .3; player.rollCd = .65; player.vx = player.facing * 440; player.trailTimer = 0; shadowDashBurst(player.facing); }
       if (!noClipModeRef.current && !focusing && !controlsLocked && tap(settingsRef.current.bindings.jump)) {
-        if (keys.has(settingsRef.current.bindings.down) && player.grounded) { player.drop = .22; player.grounded = false; player.y += 5; }
-        else if (player.grounded || player.jumps < 2) { player.vy = -PLAYER_JUMP_SPEED; player.jumps++; player.grounded = false; dustCloud(player.x + 17, player.y + 55, .65); }
+        if (keys.has(settingsRef.current.bindings.down) && player.grounded) {
+          if (tutorialActive) tutorialProgress.current.drop = true;
+          player.drop = .22; player.grounded = false; player.y += 5;
+        } else if (player.grounded || player.jumps < 2) {
+          if (tutorialActive) {
+            if (player.grounded) tutorialProgress.current.jump = true;
+            else tutorialProgress.current.doubleJump = true;
+          }
+          player.vy = -PLAYER_JUMP_SPEED; player.jumps++; player.grounded = false; dustCloud(player.x + 17, player.y + 55, .65);
+        }
       }
       const nearbyPrisonGate = prisonGates.find((gate) => !gate.opened
         && Math.abs(player.x + player.w / 2 - (gate.x + gate.w / 2)) < 76
@@ -2708,7 +2779,17 @@ export default function App() {
       }
       if (activeDoor) {
         activeDoor.opening -= dt;
-        if (activeDoor.opening <= 0) { const destination = activeDoor.destination; activeDoor = null; if (location === 'prison') unlockAchievement('escape'); else if (location === 'swamps') unlockAchievement('swamp_guide'); else if (location === 'mines') unlockAchievement('miner'); else if (location === 'clock') unlockAchievement('clockmaker'); runProgress.current.maxHp = player.maxHp; runProgress.current.hp = player.maxHp; runProgress.current.shards = shards; writeChronicle(); setPendingDestination(destination); setShopVisit((visit) => visit + 1); setAlchemistRelicOffers(chooseRelics(runProgress.current.relics)); pausedRef.current = true; setShopOpen(true); refreshShop((value) => value + 1); return; }
+        if (activeDoor.opening <= 0) {
+          const destination = activeDoor.destination; activeDoor = null;
+          runProgress.current.maxHp = player.maxHp; runProgress.current.hp = player.maxHp; runProgress.current.shards = shards;
+          if (tutorialActive) {
+            // Training flows straight into the real first location. There is no
+            // merchant stop and the sector counter remains at one.
+            setTutorialActive(false); setLocation('prison'); setRunKey((value) => value + 1); return;
+          }
+          if (location === 'prison') unlockAchievement('escape'); else if (location === 'swamps') unlockAchievement('swamp_guide'); else if (location === 'mines') unlockAchievement('miner'); else if (location === 'clock') unlockAchievement('clockmaker');
+          writeChronicle(); setPendingDestination(destination as Exclude<LocationKind, 'prison'>); setShopVisit((visit) => visit + 1); setAlchemistRelicOffers(chooseRelics(runProgress.current.relics)); pausedRef.current = true; setShopOpen(true); refreshShop((value) => value + 1); return;
+        }
       }
       uiTimer -= dt;
       if (uiTimer <= 0) { uiTimer = .08; setHud({ hp: player.hp, maxHp: player.maxHp, shards, kills, grenade: Math.max(0, grenadeCd), trap: Math.max(0, trapCd), message: player.dead ? 'ВЫ ПРОИГРАЛИ' : '' }); }
@@ -2786,6 +2867,21 @@ export default function App() {
         ctx.globalAlpha = 1;
       }
       ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; for (const sign of loreSigns) { ctx.globalAlpha = sign.alpha; ctx.fillStyle = '#c9a46a'; ctx.fillText(sign.text, sign.x, sign.y); ctx.fillStyle = '#4b1d22'; ctx.fillRect(sign.x - 8, sign.y + 7, 4, 4); } ctx.globalAlpha = 1;
+      if (tutorialActive) {
+        const progress = tutorialProgress.current;
+        const drawTutorialPanel = (x: number, y: number, lines: string[]) => {
+          const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 34;
+          ctx.fillStyle = 'rgba(3,7,12,.9)'; ctx.fillRect(x - 17, y - 23, width, lines.length * 20 + 17);
+          ctx.strokeStyle = 'rgba(103,232,249,.45)'; ctx.lineWidth = 2; ctx.strokeRect(x - 17, y - 23, width, lines.length * 20 + 17);
+          ctx.fillStyle = '#cffafe'; ctx.font = 'bold 12px ui-sans-serif';
+          lines.forEach((line, index) => ctx.fillText(line, x, y + index * 20));
+        };
+        ctx.font = 'bold 12px ui-sans-serif';
+        if (!progress.hideAll && (!progress.left || !progress.right)) drawTutorialPanel(rooms[3].x + 160, rooms[3].y + roomH - 160, ['A — ВЛЕВО', 'D — ВПРАВО']);
+        if (!progress.hideAll && (!progress.jump || !progress.doubleJump || !progress.drop)) drawTutorialPanel(rooms[4].x + 35, rooms[4].y + roomH - 250, ['ПРОБЕЛ — ПРЫЖОК', 'ПРОБЕЛ + ПРОБЕЛ — ДВОЙНОЙ ПРЫЖОК', 'S + ПРОБЕЛ — СПРЫГНУТЬ']);
+        if (!progress.hideAll && enemies.some((enemy) => !enemy.dead)) drawTutorialPanel(rooms[2].x + 95, rooms[2].y + 405, ['ЛКМ — УДАРИТЬ', 'S + ЛКМ — УДАР ВНИЗ В ПОЛЁТЕ', 'W + ЛКМ — УДАР ВВЕРХ', 'ЗАЖАТЬ ЛКМ — КОМБО-УДАР']);
+        if (!progress.hideAll && !progress.map && enemies.every((enemy) => enemy.dead)) drawTutorialPanel(rooms[2].x + 330, rooms[2].y + roomH - 150, ['TAB — КАРТА', 'ДВЕРЬ ВЕДЁТ В ПЕРВУЮ ЛОКАЦИЮ']);
+      }
       ctx.globalAlpha = .45; ctx.fillStyle = theme.stone;
       for (const bridge of oneWays) { ctx.fillRect(bridge.x + 10, bridge.y + bridge.h, 8, 24); ctx.fillRect(bridge.x + bridge.w - 18, bridge.y + bridge.h, 8, 24); }
       ctx.globalAlpha = 1;
@@ -3235,7 +3331,7 @@ export default function App() {
     };
     raf = requestAnimationFrame(loop);
     return () => { saveMapSnapshot(); dropReplacedWeapon.current = () => {}; cancelAnimationFrame(raf); window.removeEventListener('resize', resizeCanvas); window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); window.removeEventListener('mouseup', mouseUp); canvas.removeEventListener('mousedown', mouseDown); };
-  }, [started, runKey, sector, location, runMode]);
+  }, [started, runKey, sector, location, runMode, tutorialActive]);
 
   const gearIcons: Record<GearKind, string> = { sword: '⚔', bow: '➶', shield: '⬟', grenade: '✹', freeze: '❄', trap: '⌁', empty: '·' };
   const slots = runProgress.current.loadout.map((gear, index) => ({ key: String(index + 1), title: gear.name, icon: gearIcons[gear.kind], tier: gear.tier, cd: index === 2 ? hud.grenade : index === 3 ? hud.trap : 0 }));
@@ -3342,24 +3438,24 @@ export default function App() {
   const beginNewInSlot = (slot: number) => {
     permanentProgress.current = emptyPermanentProgress();
     setLegacyProgress(emptyLegacyProgress());
-    setActiveSaveSlot(slot); setRunMode('normal'); setStartingWeapons(['sword', 'bow']); setChoosingMode(true);
+    setActiveSaveSlot(slot); setRunMode('normal'); setChoosingMode(true);
   };
   const startNewGame = () => {
     bossTrialRef.current = null; setBossTrial(null);
     localStorage.removeItem('ashfall-autosave'); setAutosave(null);
     setEnding(false); setStoryMessage(''); setShopVisit(0); setRelicClaimedVisit(null); setDeathSummary(null); setDeathScreen('stats'); setCombatNotice(null);
     runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 }; legacyAwarded.current = false; savedRecordForRun.current = false; runElapsed.current = 0; timedGhostFrames.current = []; setElapsedHud(0); setDeathAdvice(''); setChronicle('');
-    runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0); setLocation('prison'); setSector(1);
+    tutorialProgress.current = { left: false, right: false, jump: false, doubleJump: false, drop: false, map: false, hideAll: false };
+    runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0); setTutorialActive(true); setLocation('prison'); setSector(1);
     setMapArchive({}); mapOpenRef.current = false; setMapOpen(false);
-    const chosen = startingWeapons.map((kind) => ({ ...BASIC_WEAPONS.find((gear) => gear.kind === kind)! }));
     const emptyGear = (): Gear => ({ kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 });
-    runProgress.current.loadout = [chosen[0], chosen[1], emptyGear(), emptyGear()] as [Gear, Gear, Gear, Gear];
+    runProgress.current.loadout = [emptyGear(), emptyGear(), emptyGear(), emptyGear()];
     if (legacyProgress.unlocks.includes('vitality')) { runProgress.current.maxHp++; runProgress.current.hp++; }
     if (legacyProgress.unlocks.includes('arsenal')) runProgress.current.loadout = runProgress.current.loadout.map((gear) => gear.kind === 'empty' ? gear : ({ ...gear, tier: 2, damage: Math.round(gear.damage * 1.2) })) as [Gear, Gear, Gear, Gear];
     if (legacyProgress.unlocks.includes('fortune')) runProgress.current.shards = 20;
     if (legacyProgress.unlocks.includes('relicLore')) { const relic = chooseRelics([], 1)[0]; if (relic) runProgress.current.relics.push(relic.id); }
     setHud({ hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, shards: runProgress.current.shards, kills: 0, grenade: 0, trap: 0, message: '' });
-    pausedRef.current = false; setPaused(false); setChoosingLoadout(false); setChoosingMode(false); setRunKey((value) => value + 1); setStarted(true);
+    pausedRef.current = false; setPaused(false); setChoosingMode(false); setRunKey((value) => value + 1); setStarted(true);
   };
   const startBossTrial = (trial: BossTrial) => {
     const progress = freshRun(permanentProgress.current);
@@ -3368,13 +3464,10 @@ export default function App() {
     if (rewardTier >= 2) { progress.maxHp += 1; progress.hp += 1; }
     progress.loadout = [{ ...BASIC_WEAPONS[0], damage: 34, tier: 4 }, { ...BASIC_WEAPONS[2], damage: 25, tier: 4 }, { kind: 'grenade', equipmentId: 'fragmentation_bomb', name: 'Осколочная бомба', tier: 3, damage: 55, cooldown: 5 }, { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 }];
     runProgress.current = progress; runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 };
-    bossTrialRef.current = trial; setBossTrial(trial); setTrialRewardMessage(''); setDeathSummary(null); setDeathScreen('stats'); runElapsed.current = 0; setElapsedHud(0); setLocation(trial.location); setSector(trial.location === 'throne' ? 6 : trial.location === 'crypt' || trial.location === 'bridge' ? 4 : 2);
+    bossTrialRef.current = trial; setBossTrial(trial); setTutorialActive(false); setTrialRewardMessage(''); setDeathSummary(null); setDeathScreen('stats'); runElapsed.current = 0; setElapsedHud(0); setLocation(trial.location); setSector(trial.location === 'throne' ? 6 : trial.location === 'crypt' || trial.location === 'bridge' ? 4 : 2);
     setHud({ hp: progress.hp, maxHp: progress.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
     selectedSlot.current = 0; setActiveSlot(0); pausedRef.current = false; setPaused(false); setStoryMessage(`${trial.boss}: ${trial.description}`); setRunKey((value) => value + 1); setStarted(true);
     window.setTimeout(() => setStoryMessage(''), 3500);
-  };
-  const toggleStartingWeapon = (kind: GearKind) => {
-    setStartingWeapons((current) => current.includes(kind) ? current.filter((item) => item !== kind) : current.length < 2 ? [...current, kind] : current);
   };
   const loadGame = (save: SavedGame, slot?: number) => {
     bossTrialRef.current = null; setBossTrial(null);
@@ -3386,7 +3479,7 @@ export default function App() {
     const migratedShards = save.progress.shards ?? save.progress.cells ?? 0;
     runProgress.current = { ...save.progress, hp: migratedHp, maxHp: migratedMaxHp, shards: migratedShards, cells: undefined, relics: save.progress.relics ?? [], mapArchive: save.progress.mapArchive ?? {}, loadout: save.progress.loadout.map((gear) => ({ ...gear })) as [Gear, Gear, Gear, Gear] };
     setMapArchive({ ...runProgress.current.mapArchive }); mapOpenRef.current = false; setMapOpen(false);
-    selectedSlot.current = 0; setActiveSlot(0); setLocation(save.location); setSector(save.sector);
+    selectedSlot.current = 0; setActiveSlot(0); setTutorialActive(false); setLocation(save.location); setSector(save.sector);
     setHud({ hp: migratedHp, maxHp: migratedMaxHp, shards: migratedShards, kills: 0, grenade: 0, trap: 0, message: '' });
     if (slot !== undefined) setActiveSaveSlot(slot); setDebugOpen(false); setSettingsOpen(false); pausedRef.current = false; setPaused(false); setRunKey((value) => value + 1); setStarted(true);
   };
@@ -3399,19 +3492,19 @@ export default function App() {
     unlockAchievement('reality_hack');
     const [nextLocation, nextSector] = value.split(':') as [LocationKind, string];
     if (!nextLocation) return;
-    setEnding(false); setStoryMessage(''); setShopOpen(false); pausedRef.current = false; setPaused(false);
+    setEnding(false); setStoryMessage(''); setShopOpen(false); setTutorialActive(false); pausedRef.current = false; setPaused(false);
     runProgress.current.hp = runProgress.current.maxHp; setHud((current) => ({ ...current, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, message: '' }));
     setLocation(nextLocation); setSector(Number(nextSector)); setRunKey((value) => value + 1); setStarted(true);
   };
   const returnToMainMenu = () => {
-    pausedRef.current = false; setPaused(false); mapOpenRef.current = false; setMapOpen(false); setShopOpen(false); setDebugOpen(false); setSettingsOpen(false); setEnding(false); setStoryMessage(''); setChoosingLoadout(false); setSoulHud(0);
+    pausedRef.current = false; setPaused(false); mapOpenRef.current = false; setMapOpen(false); setShopOpen(false); setDebugOpen(false); setSettingsOpen(false); setEnding(false); setStoryMessage(''); setSoulHud(0);
     setHud((current) => ({ ...current, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, kills: 0, grenade: 0, trap: 0, message: '' })); setMenuTab('play'); setMainMenuScreen('main'); setStarted(false);
   };
   const finishRunToMainMenu = () => {
     localStorage.removeItem('ashfall-autosave'); setAutosave(null);
     runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0);
     setHud({ hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' }); setSoulHud(0);
-    pausedRef.current = false; setPaused(false); setShopOpen(false); setDebugOpen(false); setSettingsOpen(false); setStoryMessage(''); setEnding(false); setChoosingLoadout(false);
+    pausedRef.current = false; setPaused(false); setShopOpen(false); setDebugOpen(false); setSettingsOpen(false); setStoryMessage(''); setEnding(false);
     godModeRef.current = false; noClipModeRef.current = false; setGodMode(false); setNoClipMode(false);
     setLocation('prison'); setSector(1); setMenuTab('play'); setMainMenuScreen('main'); setStarted(false);
   };
@@ -3422,9 +3515,9 @@ export default function App() {
 
   return (
     <main className="h-screen h-dvh overflow-hidden bg-[#090e12] font-sans text-slate-100 selection:bg-teal-300/30">
-      {!started && !choosingLoadout && !choosingMode && mainMenuScreen === 'main' && <button onClick={() => setMainMenuScreen('legacy')} className="fixed bottom-6 left-6 z-[120] border border-orange-300/45 bg-black/55 px-4 py-3 text-xs font-black uppercase tracking-wider text-orange-100">Наследие · {legacyProgress.embers} 🔥</button>}
+      {!started && !choosingMode && mainMenuScreen === 'main' && <button onClick={() => setMainMenuScreen('legacy')} className="fixed bottom-6 left-6 z-[120] border border-orange-300/45 bg-black/55 px-4 py-3 text-xs font-black uppercase tracking-wider text-orange-100">Наследие · {legacyProgress.embers} 🔥</button>}
       {!started && mainMenuScreen === 'legacy' && <div className="fixed inset-0 z-[130] overflow-y-auto bg-[#080b12]/95 p-6 backdrop-blur-md"><section className="mx-auto max-w-5xl"><button onClick={() => setMainMenuScreen('main')} className="mb-6 border border-white/15 px-4 py-2 text-xs text-slate-300">← Главное меню</button><h2 className="mb-6 text-3xl font-black uppercase">Наследие рыцаря</h2><LegacyTree progress={legacyProgress} onUnlock={unlockLegacy}/></section></div>}
-      {!started && !choosingLoadout && !choosingMode && <div ref={menuSceneRef} onMouseMove={moveMenuParallax} className="dead-menu fixed inset-0 z-[90] overflow-hidden bg-[#10152d] text-slate-100">
+      {!started && !choosingMode && <div ref={menuSceneRef} onMouseMove={moveMenuParallax} className="dead-menu fixed inset-0 z-[90] overflow-hidden bg-[#10152d] text-slate-100">
         <EnvironmentParticles/>
         <div className="dead-menu-sky"/><div className="dead-menu-sun"/>
         <svg className="dead-menu-clouds-svg dead-menu-clouds-far" viewBox="0 0 1600 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g className="cloud-bank cloud-bank-a"><circle cx="120" cy="180" r="62"/><circle cx="185" cy="153" r="91"/><circle cx="274" cy="176" r="72"/><circle cx="337" cy="196" r="48"/><path d="M55 206Q140 164 230 195T390 205Q350 244 90 235Z"/></g><g className="cloud-bank cloud-bank-b"><circle cx="710" cy="112" r="48"/><circle cx="765" cy="87" r="73"/><circle cx="840" cy="108" r="60"/><circle cx="900" cy="126" r="41"/><path d="M650 137Q744 99 824 129T950 142Q886 171 690 164Z"/></g><g className="cloud-bank cloud-bank-c"><circle cx="1245" cy="205" r="70"/><circle cx="1320" cy="163" r="105"/><circle cx="1420" cy="194" r="82"/><circle cx="1491" cy="218" r="49"/><path d="M1170 233Q1280 181 1380 220T1555 237Q1480 274 1210 265Z"/></g></svg>
@@ -3450,7 +3543,7 @@ export default function App() {
           </section>}
         </div><footer className="absolute bottom-5 right-6 z-20 text-[8px] uppercase tracking-[.22em] text-slate-300/35">Версия странника · Обычный режим</footer>
       </div>}
-      {!started && menuTab === 'saves' && !choosingLoadout && <div className="fixed inset-x-[5vw] bottom-[10vh] top-[18vh] z-[60] overflow-y-auto border border-cyan-300/15 bg-[#071016]/98 p-5 text-left shadow-[0_30px_90px_rgba(0,0,0,.85)] backdrop-blur-md md:p-7">
+      {!started && menuTab === 'saves' && <div className="fixed inset-x-[5vw] bottom-[10vh] top-[18vh] z-[60] overflow-y-auto border border-cyan-300/15 bg-[#071016]/98 p-5 text-left shadow-[0_30px_90px_rgba(0,0,0,.85)] backdrop-blur-md md:p-7">
         <div className="sticky top-0 z-10 flex items-end justify-between border-b border-white/10 bg-[#071016]/95 pb-4"><div><p className="text-[9px] font-black uppercase tracking-[.35em] text-cyan-300">Хроники падшего</p><h2 className="mt-1 text-2xl font-black uppercase md:text-3xl">Выберите слот</h2></div><button onClick={() => setMenuTab('play')} className="border border-white/15 px-3 py-2 text-[9px] font-black uppercase text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200">Назад</button></div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">{saveSlots.map((save, index) => <article key={index} className={`save-slot-card relative min-h-52 overflow-hidden border p-5 ${activeSaveSlot === index ? 'border-cyan-300/60' : 'border-white/10'}`}><div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-cyan-300/5 blur-3xl"/><p className="text-[9px] font-black uppercase tracking-[.28em] text-slate-500">Слот сохранения {index + 1}</p>{save ? <><button onClick={() => deleteSave(index)} title="Стереть этот слот" className="absolute right-4 top-4 z-10 border border-rose-400/20 bg-black/30 px-2 py-1.5 text-[8px] font-bold uppercase text-rose-300/70 transition hover:border-rose-300/60 hover:text-rose-200">☠ Сбросить забег</button><button onClick={() => loadGame(save, index)} className="save-slot-primary mt-6 w-full border border-cyan-300/45 bg-cyan-300/10 px-5 py-3 text-xs font-black uppercase tracking-[.14em] text-cyan-100">Продолжить (Обычный режим)</button><div className="mt-5 grid gap-2 border-t border-white/10 pt-4 text-[10px] tracking-wide text-slate-400"><p><span className="text-slate-600">Текущий уровень:</span> <b className="text-slate-200">{LOCATION_NAMES[save.location]}</b></p><p><span className="text-slate-600">Собрано осколков:</span> <b className="text-amber-200">{save.progress.shards ?? save.progress.cells ?? 0} 💎</b></p><p><span className="text-slate-600">Запас здоровья:</span> <b className="text-rose-200">{save.progress.hp} / 5 🩸</b></p></div></> : <div className="grid min-h-36 place-items-center"><div className="w-full"><p className="mb-5 text-center text-[10px] uppercase tracking-[.22em] text-slate-700">Пустая хроника</p><button onClick={() => beginNewInSlot(index)} className="save-slot-primary w-full border border-cyan-300/40 bg-cyan-300/5 px-5 py-3 text-xs font-black uppercase tracking-[.12em] text-cyan-100">Новый забег (Обычный режим)</button></div></div>}</article>)}</div>
       </div>}
@@ -3515,7 +3608,7 @@ export default function App() {
         </div>
       </div>}
       <div className="relative flex h-full min-h-0 w-full flex-col justify-center">
-        {!started && choosingMode && <RunModeChoice value={runMode} onChange={setRunMode} onBack={() => setChoosingMode(false)} onContinue={() => { setChoosingMode(false); setChoosingLoadout(true); }}/>} 
+        {!started && choosingMode && <RunModeChoice value={runMode} onChange={setRunMode} onBack={() => setChoosingMode(false)} onContinue={startNewGame}/>} 
         {started && <header className="flex shrink-0 items-end justify-between gap-4 px-4 py-2 md:px-7">
           <div><p className="text-[10px] font-bold uppercase tracking-[.38em] text-teal-300/70">Stage {String(sector).padStart(2, '0')} · {LOCATION_NAMES[location]}</p><h1 className="text-xl font-black uppercase tracking-tight md:text-2xl">False Knight <span className="font-light text-slate-500">// {currentTheme.subtitle}</span></h1></div>
           <div className="text-right text-[9px] font-black uppercase tracking-[.15em] text-amber-200"><p>{runModeName(runMode)}</p><p className={runMode === 'timed' && TIMED_RUN_SECONDS - elapsedHud < 120 ? 'text-rose-300' : 'text-slate-400'}>{runMode === 'timed' ? `${String(Math.max(0, Math.floor((TIMED_RUN_SECONDS - elapsedHud) / 60))).padStart(2, '0')}:${String(Math.max(0, TIMED_RUN_SECONDS - elapsedHud) % 60).padStart(2, '0')}` : `${String(Math.floor(elapsedHud / 60)).padStart(2, '0')}:${String(elapsedHud % 60).padStart(2, '0')}`}</p></div>
@@ -3575,14 +3668,13 @@ export default function App() {
               {runMode === 'checkpoint'
                 ? <button onClick={respawnAtLocationStart} className="mt-6 border border-emerald-300/55 bg-emerald-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-emerald-50 hover:bg-emerald-300/20">Возродиться в начале локации</button>
                 : <button onClick={() => setDeathScreen('interrupted')} className="mt-6 border border-cyan-300/55 bg-cyan-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-cyan-50 hover:bg-cyan-300/20">Продолжить</button>}
-            </section> : <section className="pointer-events-auto max-w-2xl border-y border-rose-400/40 bg-black/80 px-7 py-7 text-center shadow-[0_0_70px_rgba(244,63,94,.18)] md:px-12"><p className="text-[10px] font-bold uppercase tracking-[.4em] text-rose-400">Красная искра погасла</p><p className="mt-4 text-lg font-semibold leading-8 text-slate-200 md:text-2xl">«{deathQuote}»</p><p className="mt-3 text-2xl font-black uppercase tracking-[.12em] md:text-4xl">Твой поход прерван</p><div className="mt-4 border border-cyan-300/15 bg-cyan-300/5 px-4 py-3 text-xs leading-5 text-cyan-50"><b className="mb-1 block text-[8px] uppercase tracking-[.24em] text-cyan-300">Совет хранителя</b>{deathAdviceLoading ? 'Хранитель изучает твой бой…' : deathAdvice}</div><p className="mt-3 text-xs uppercase tracking-[.25em] text-slate-500">Постоянные улучшения сохранены</p><button onClick={() => { pausedRef.current = false; setPaused(false); setMenuTab('play'); setStarted(false); setChoosingLoadout(true); }} className="mt-6 border border-teal-300/50 bg-teal-300/10 px-6 py-3 text-xs font-bold uppercase tracking-[.2em] text-teal-100 hover:bg-teal-300/20">Выбрать оружие и начать заново</button></section>}
+            </section> : <section className="pointer-events-auto max-w-2xl border-y border-rose-400/40 bg-black/80 px-7 py-7 text-center shadow-[0_0_70px_rgba(244,63,94,.18)] md:px-12"><p className="text-[10px] font-bold uppercase tracking-[.4em] text-rose-400">Красная искра погасла</p><p className="mt-4 text-lg font-semibold leading-8 text-slate-200 md:text-2xl">«{deathQuote}»</p><p className="mt-3 text-2xl font-black uppercase tracking-[.12em] md:text-4xl">Твой поход прерван</p><div className="mt-4 border border-cyan-300/15 bg-cyan-300/5 px-4 py-3 text-xs leading-5 text-cyan-50"><b className="mb-1 block text-[8px] uppercase tracking-[.24em] text-cyan-300">Совет хранителя</b>{deathAdviceLoading ? 'Хранитель изучает твой бой…' : deathAdvice}</div><p className="mt-3 text-xs uppercase tracking-[.25em] text-slate-500">Постоянные улучшения сохранены</p><button onClick={startNewGame} className="mt-6 border border-teal-300/50 bg-teal-300/10 px-6 py-3 text-xs font-bold uppercase tracking-[.2em] text-teal-100 hover:bg-teal-300/20">Начать заново</button></section>}
           </div>}
           {hud.message === 'ДВЕРИ ОТКРЫТЫ' && <div className="pointer-events-none absolute inset-x-0 top-24 flex justify-center"><div className="border border-teal-300/30 bg-[#071015]/85 px-6 py-3 text-center shadow-[0_0_35px_rgba(45,212,191,.16)]"><p className="text-sm font-black tracking-[.22em] text-teal-100 md:text-lg">ДВЕРИ ОТКРЫТЫ</p><p className="mt-1 text-[8px] uppercase tracking-[.25em] text-teal-300/60"><span className="desktop-interaction-hint">Найдите дверь и нажмите E</span><span className="mobile-interaction-hint">Подойдите и нажмите на дверь</span></p></div></div>}
           {!started && <div className="absolute inset-0 z-20 bg-[#0a1015]/95 px-5 py-5 text-center md:px-8 md:py-6">
             <div className="flex items-center justify-between gap-3"><nav className="flex flex-wrap gap-2"><button onClick={() => setMenuTab('play')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'play' ? 'border-teal-300/60 text-teal-200' : 'border-white/10 text-slate-500'}`}>Играть</button><button onClick={() => setMenuTab('saves')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'saves' ? 'border-teal-300/60 text-teal-200' : 'border-white/10 text-slate-500'}`}>Сохранения</button><button onClick={() => setMenuTab('achievements')} className={`border px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] ${menuTab === 'achievements' ? 'border-amber-300/60 text-amber-200' : 'border-white/10 text-slate-500'}`}>Достижения</button><button onClick={() => setSettingsOpen(true)} className="border border-white/10 px-3 py-2 text-[9px] font-black uppercase tracking-[.14em] text-slate-500 hover:border-cyan-300/50 hover:text-cyan-200">Настройки</button></nav><button onClick={() => session ? supabase.auth.signOut() : setShowAuth(true)} disabled={!authReady} className="border border-white/15 bg-black/30 px-3 py-2 text-[8px] font-black uppercase tracking-[.12em] text-slate-300 transition hover:border-teal-300/50 hover:text-teal-200 disabled:opacity-40">{session ? 'Выйти' : 'Войти'}</button></div>
             {menuTab === 'play' ? <div className="grid h-[calc(100%-45px)] place-items-center"><div className="max-w-2xl"><h2 className="mb-4 text-4xl font-black uppercase tracking-tight md:text-6xl">False <span className="text-slate-500">Knight</span></h2><p className="mx-auto mb-7 max-w-xl text-sm leading-6 text-slate-400">Ты — дух без памяти, скованный тяжёлыми стальными доспехами. Поднимись через заброшенные уровни замка, сокруши пятерых Лордов и узнай, почему тебя назвали Ложным Рыцарем.</p><div className="mx-auto grid max-w-xs gap-3"><button onClick={() => setMenuTab('saves')} className="border border-amber-300/60 bg-amber-300/10 px-8 py-3 text-xs font-black uppercase tracking-[.24em] text-amber-100 hover:bg-amber-300/20">Новая игра</button><button onClick={() => setMenuTab('saves')} disabled={!saveSlots.some(Boolean)} className="border border-white/15 px-8 py-3 text-xs font-bold uppercase tracking-[.24em] text-slate-300 disabled:cursor-not-allowed disabled:opacity-30">Продолжить</button></div></div></div> : menuTab === 'saves' ? <div className="mx-auto mt-5 max-w-5xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-teal-300">Выберите слот</p><div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">{saveSlots.map((save, index) => <section key={index} className={`border bg-black/25 p-4 text-left ${activeSaveSlot === index ? 'border-teal-300/60' : 'border-white/10'}`}><p className="text-[9px] font-black uppercase tracking-[.2em] text-slate-500">Слот {index + 1}</p>{save ? <><h3 className="mt-3 text-sm font-black">Stage {String(save.sector).padStart(2, '0')} — {LOCATION_NAMES[save.location]}</h3><p className="mt-2 text-[10px] leading-5 text-slate-500">Осколки: {save.progress.shards ?? save.progress.cells ?? 0}<br/>Маски: {save.progress.hp}/{save.progress.maxHp}<br/>{new Date(save.savedAt).toLocaleString('ru-RU')}</p><div className="mt-4 grid gap-2"><button onClick={() => loadGame(save, index)} className="border border-teal-300/40 py-2 text-[9px] font-bold uppercase text-teal-200">Продолжить</button><button onClick={() => deleteSave(index)} className="border border-rose-400/20 py-2 text-[8px] uppercase text-rose-300">Стереть</button></div></> : <><p className="my-6 text-xs text-slate-700">Пустой слот</p><button onClick={() => beginNewInSlot(index)} className="w-full border border-amber-300/40 py-2 text-[9px] font-bold uppercase text-amber-200">Начать игру</button></>}</section>)}</div></div> : <div className="mx-auto mt-7 max-w-3xl"><p className="text-[10px] font-black uppercase tracking-[.35em] text-amber-300">Достижения</p><div className="mt-5 grid gap-3 md:grid-cols-2">{[{title:'Первый шаг',done:saveSlots.some(Boolean),text:'Начать первый забег'},{title:'Восхождение',done:saveSlots.some((save) => (save?.sector || 0) >= 3),text:'Добраться до Clock Tower'},{title:'Коллекционер',done:saveSlots.some((save) => (save?.progress.shards || 0) >= 100),text:'Собрать 100 Осколков'},{title:'Возвращение',done:saveSlots.some((save) => save?.location === 'throne'),text:'Добраться до Тронного зала'}].map((achievement) => <div key={achievement.title} className={`border p-4 text-left ${achievement.done ? 'border-amber-300/40 bg-amber-300/10' : 'border-white/10 bg-black/20 opacity-45'}`}><b className="text-sm text-slate-100">{achievement.done ? '◆ ' : '◇ '}{achievement.title}</b><p className="mt-1 text-[10px] text-slate-500">{achievement.text}</p></div>)}</div></div>}
           </div>}
-          {!started && choosingLoadout && <div className="absolute inset-0 z-30 grid place-items-center bg-[#071015]/95 px-5 text-center backdrop-blur-md"><div className="w-full max-w-2xl"><p className="text-[10px] font-black uppercase tracking-[.4em] text-teal-300">Подготовка к забегу</p><h2 className="mt-3 text-3xl font-black uppercase md:text-5xl">Выберите 2 оружия</h2><div className="mt-7 grid grid-cols-3 gap-3">{BASIC_WEAPONS.map((gear) => { const selected = startingWeapons.includes(gear.kind); return <button key={gear.kind} onClick={() => toggleStartingWeapon(gear.kind)} className={`relative grid aspect-square place-items-center border p-3 transition ${selected ? 'border-teal-300 bg-teal-300/10 shadow-[0_0_25px_rgba(45,212,191,.15)]' : 'border-white/10 bg-black/25 text-slate-500 hover:border-white/30'}`}><span className="text-4xl md:text-6xl">{gearIcons[gear.kind]}</span><span className="mt-2 text-[9px] font-black uppercase tracking-[.12em] md:text-xs">{gear.name}</span>{selected && <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center bg-teal-300 text-[10px] font-black text-slate-950">✓</span>}</button>})}</div><p className="mt-4 text-xs text-slate-500">Выбрано: {startingWeapons.length} / 2</p><div className="mt-6 flex justify-center gap-3"><button onClick={() => setChoosingLoadout(false)} className="border border-white/10 px-5 py-3 text-[9px] font-bold uppercase tracking-[.18em] text-slate-500">Назад</button><button onClick={startNewGame} disabled={startingWeapons.length !== 2} className="border border-teal-300/60 bg-teal-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-teal-100 disabled:cursor-not-allowed disabled:opacity-30">Начать забег</button></div></div></div>}
           {started && paused && !relicChoiceOpen.current && !mapOpen && <div className="absolute inset-0 z-20 grid place-items-center overflow-y-auto bg-[#05090d]/85 px-4 py-4 text-center backdrop-blur-sm">{pauseBestiaryOpen ? <div className="w-full max-w-6xl border-y border-red-300/30 bg-black/75 px-4 py-5 md:px-7"><div className="mb-4 flex items-end justify-between border-b border-white/10 pb-3 text-left"><div><p className="text-[9px] font-black uppercase tracking-[.32em] text-red-300/70">Игра приостановлена</p><h2 className="mt-1 text-2xl font-black uppercase md:text-3xl">Книга врагов и боссов</h2></div><button onClick={() => setPauseBestiaryOpen(false)} className="border border-white/15 px-4 py-2 text-[9px] font-black uppercase tracking-[.16em] text-slate-300 hover:border-red-300/50 hover:text-red-200">Назад</button></div><BestiaryBook progress={bestiaryProgress}/></div> : <div className="w-full max-w-lg border-y border-teal-300/30 bg-black/60 px-8 py-6"><p className="text-[10px] font-bold uppercase tracking-[.4em] text-teal-300">Игра приостановлена</p><h2 className="mt-2 text-3xl font-black uppercase tracking-tight">Пауза</h2><DailyChallengeCard challenge={dailyChallenge} progress={dailyProgress(dailyChallenge, summarizeRun())} loading={dailyLoading} completed={dailyReward.completedDate === dailyChallenge.date} streak={dailyReward.streak}/><div className="mt-5 grid gap-2"><button onClick={() => { pausedRef.current = false; setPaused(false); }} className="border border-teal-300/60 bg-teal-300/10 px-6 py-3 text-xs font-black uppercase tracking-[.22em] text-teal-100 hover:bg-teal-300/20">Продолжить</button><button onClick={() => setPauseBestiaryOpen(true)} className="border border-red-300/30 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-red-200 transition hover:border-red-300/60 hover:bg-red-300/10">Книга врагов и боссов</button><button onClick={() => setSettingsOpen(true)} className="border border-cyan-300/30 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-cyan-200 transition hover:border-cyan-300/60 hover:bg-cyan-300/10">Настройки</button><button onClick={returnToMainMenu} className="border border-white/15 px-6 py-3 text-xs font-bold uppercase tracking-[.22em] text-slate-400 transition hover:border-rose-400/40 hover:text-rose-300">В главное меню</button></div><p className="mt-3 text-[9px] uppercase tracking-[.2em] text-slate-600">Esc — продолжить</p></div>}</div>}
         </section>
         </div>
