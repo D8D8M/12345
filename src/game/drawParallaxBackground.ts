@@ -63,3 +63,31 @@ export const drawParallaxLayers = (ctx: CanvasRenderingContext2D, location: Para
   drawLayer(ctx, width, height, cameraX, cameraY, .14, palette.middle, 1, location);
   drawLayer(ctx, width, height, cameraX, cameraY, .28, palette.near, 2, location);
 };
+
+export const drawLocationBackdrop = (ctx: CanvasRenderingContext2D, location: ParallaxLocation, width: number, height: number, cameraX = 0, cameraY = 0, time = 0) => {
+  drawParallaxBackground(ctx, location, width, height);
+  if (location === 'swamps') {
+    const sky = ctx.createLinearGradient(0, 0, 0, height); sky.addColorStop(0, '#182843'); sky.addColorStop(.52, '#39483f'); sky.addColorStop(1, '#17251c');
+    ctx.fillStyle = sky; ctx.fillRect(-20, -20, width + 40, height + 40);
+    ctx.fillStyle = 'rgba(196,214,151,.13)'; ctx.beginPath(); ctx.arc(width * .73, 112, 76, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 14; i++) {
+      const x = ((i * 137 - cameraX * .12) % (width + 260)) - 100, treeHeight = 210 + (i % 4) * 55;
+      ctx.fillStyle = i % 2 ? '#14251f' : '#10201c'; ctx.fillRect(x, height - treeHeight, 24 + (i % 3) * 9, treeHeight);
+      ctx.beginPath(); ctx.arc(x + 12, height - treeHeight + 22, 65 + (i % 3) * 18, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (location === 'clock') {
+    const copper = ctx.createLinearGradient(0, 0, width, height); copper.addColorStop(0, '#160b08'); copper.addColorStop(.5, '#3a1d13'); copper.addColorStop(1, '#0b0605');
+    ctx.fillStyle = copper; ctx.fillRect(-20, -20, width + 40, height + 40); ctx.fillStyle = 'rgba(102,46,27,.42)';
+    for (let y = -20; y < height + 40; y += 32) for (let x = -60; x < width + 80; x += 70) ctx.fillRect(x + ((y / 32) % 2) * 34, y, 62, 23);
+    const gear = (x: number, y: number, radius: number, rotation: number) => { ctx.save(); ctx.translate(x, y); ctx.rotate(rotation); ctx.strokeStyle = 'rgba(211,150,62,.14)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke(); for (let tooth = 0; tooth < 12; tooth++) { ctx.rotate(Math.PI / 6); ctx.fillStyle = 'rgba(219,153,59,.12)'; ctx.fillRect(radius - 5, -8, 22, 16); } ctx.restore(); };
+    for (let i = 0; i < 7; i++) gear(80 + i * 205, ((i * 173 - cameraY * .16) % (height + 200)) - 80, 45 + (i % 3) * 24, time * (i % 2 ? -.22 : .18));
+  } else if (location === 'bridge') {
+    const sunset = ctx.createLinearGradient(0, 0, 0, height); sunset.addColorStop(0, '#667da0'); sunset.addColorStop(.45, '#d58a72'); sunset.addColorStop(.72, '#f0aa69'); sunset.addColorStop(1, '#34273b');
+    ctx.fillStyle = sunset; ctx.fillRect(-20, -20, width + 40, height + 40);
+    const sun = ctx.createRadialGradient(width * .78, height * .38, 5, width * .78, height * .38, 105); sun.addColorStop(0, 'rgba(255,239,184,.92)'); sun.addColorStop(.35, 'rgba(255,183,105,.38)'); sun.addColorStop(1, 'rgba(255,150,80,0)');
+    ctx.fillStyle = sun; ctx.fillRect(0, 0, width, height);
+    for (let i = 0; i < 9; i++) { const x = ((i * 235 - cameraX * .1 + time * (7 + i % 3)) % (width + 360)) - 180, y = 80 + (i % 4) * 68, size = 55 + (i % 3) * 22; ctx.fillStyle = i % 2 ? 'rgba(236,225,221,.34)' : 'rgba(255,238,220,.25)'; ctx.beginPath(); ctx.ellipse(x, y, size, 18, 0, 0, Math.PI * 2); ctx.ellipse(x + size * .45, y - 8, size * .7, 22, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = 'rgba(39,31,48,.32)'; for (let i = 0; i < 8; i++) { const x = i * 210 - (cameraX * .22 % 210); ctx.beginPath(); ctx.moveTo(x, height); ctx.lineTo(x + 100, height - 100 - (i % 3) * 35); ctx.lineTo(x + 230, height); ctx.fill(); }
+  }
+  drawParallaxLayers(ctx, location, width, height, cameraX, cameraY);
+};

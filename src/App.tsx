@@ -25,7 +25,7 @@ import { createGateFragments, drawGateFragments, updateGateFragments, type GateF
 import { drawEnvironmentTile, type EnvironmentTileStyle } from './game/drawEnvironmentTile';
 import { drawCryptMechanics, drawMineMechanics, ghostPlatformVisible } from './game/drawUndergroundMechanics';
 import { createCastleMirrors, createCrossbowStatues, createThroneColumns, drawCastleMirror, drawCrossbowStatue, drawFinalStoneWall, drawThroneColumn } from './game/finalLocationMechanics';
-import { drawParallaxBackground, drawParallaxLayers } from './game/drawParallaxBackground';
+import { drawLocationBackdrop } from './game/drawParallaxBackground';
 import { DailyChallengeCard } from './components/DailyChallengeCard';
 import { claimDailyReward, dailyProgress, generateDailyChallenge, loadDailyChallenge, loadDailyReward } from './lib/dailyChallenge';
 import { requestBossLine, requestChronicle, requestDeathAdvice, type RunSummary } from './lib/gameAi';
@@ -2717,8 +2717,8 @@ export default function App() {
     const drawCanvas = () => {
       const sx = settingsRef.current.screenShake ? (Math.random() - .5) * shake : 0, sy = settingsRef.current.screenShake ? (Math.random() - .5) * shake : 0;
       ctx.save(); ctx.translate(sx, sy);
-      drawParallaxBackground(ctx, location, W, H);
       const now = gameTime;
+      drawLocationBackdrop(ctx, location, W, H, camera, cameraY, now);
       for (const enemy of enemies) if (!enemy.dead && (enemy.variant === 'cryptWarden' || enemy.variant === 'bridgeColossus') && enemy.specialAttack === 1 && enemy.attack > .78) {
         const length = enemy.variant === 'bridgeColossus' ? 330 : 260, startX = enemy.facing > 0 ? enemy.x + enemy.w : enemy.x - length;
         ctx.save(); ctx.globalAlpha = .22 + Math.sin(now * 20) * .1; ctx.fillStyle = '#ef4444'; ctx.fillRect(startX, enemy.y + 20, length, enemy.h - 30); ctx.globalAlpha = .9; ctx.strokeStyle = '#fb7185'; ctx.lineWidth = 2; ctx.setLineDash([12, 7]); ctx.strokeRect(startX, enemy.y + 20, length, enemy.h - 30); ctx.setLineDash([]); ctx.restore();
@@ -2734,7 +2734,6 @@ export default function App() {
           }
         }
       }
-      drawParallaxLayers(ctx, location, W, H, camera, cameraY);
       ctx.fillStyle = 'rgba(68,74,119,.14)';
       if (!bridgeLayout) for (let y = 95; y < H; y += 42) for (let x = -60; x < W + 80; x += 92) { const offset = Math.floor(y / 42) % 2 ? 42 : 0; ctx.fillRect(x + offset, y, 76, 3); }
       ctx.fillStyle = 'rgba(255,255,255,.018)'; for (let y = 0; y < H; y += 8) ctx.fillRect(0, y, W, 1);
