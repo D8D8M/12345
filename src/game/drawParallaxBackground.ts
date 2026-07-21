@@ -66,7 +66,20 @@ export const drawParallaxLayers = (ctx: CanvasRenderingContext2D, location: Para
 
 export const drawLocationBackdrop = (ctx: CanvasRenderingContext2D, location: ParallaxLocation, width: number, height: number, cameraX = 0, cameraY = 0, time = 0) => {
   drawParallaxBackground(ctx, location, width, height);
-  if (location === 'swamps') {
+  if (location === 'castle') {
+    ctx.fillStyle = '#4b382d';
+    for (let y = 0; y < height; y += 52) for (let x = -(y % 104); x < width; x += 130) ctx.fillRect(x, y, 122, 45);
+    for (const x of [width * .16, width * .48, width * .8]) {
+      ctx.fillStyle = '#781f2b'; ctx.fillRect(x - 38, 65, 76, 190); ctx.fillStyle = '#d4af55'; ctx.fillRect(x - 42, 65, 84, 8);
+      ctx.beginPath(); ctx.arc(x, 145, 22, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#4b1019'; ctx.font = 'bold 28px serif'; ctx.textAlign = 'center'; ctx.fillText('♛', x, 155);
+    }
+    for (const x of [width * .08, width * .32, width * .64, width * .92]) {
+      const y = height * .43; ctx.fillStyle = '#661925'; ctx.fillRect(x - 25, y, 50, 112); ctx.fillStyle = '#d4af55'; ctx.fillRect(x - 29, y, 58, 6);
+      ctx.beginPath(); ctx.arc(x, y + 48, 15, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#4b1019'; ctx.font = 'bold 19px serif'; ctx.textAlign = 'center'; ctx.fillText('♛', x, y + 55);
+    }
+    ctx.fillStyle = '#332820'; ctx.fillRect(0, height * .73, width, height * .27); ctx.fillStyle = '#d4af55'; ctx.fillRect(0, height * .73, width, 6);
+    return;
+  } else if (location === 'swamps') {
     const sky = ctx.createLinearGradient(0, 0, 0, height); sky.addColorStop(0, '#182843'); sky.addColorStop(.52, '#39483f'); sky.addColorStop(1, '#17251c');
     ctx.fillStyle = sky; ctx.fillRect(-20, -20, width + 40, height + 40);
     ctx.fillStyle = 'rgba(196,214,151,.13)'; ctx.beginPath(); ctx.arc(width * .73, 112, 76, 0, Math.PI * 2); ctx.fill();
