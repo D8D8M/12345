@@ -1,4 +1,4 @@
-export type RunMode = 'normal' | 'hardcore' | 'timed' | 'oneLife';
+export type RunMode = 'normal' | 'checkpoint' | 'hardcore' | 'timed' | 'oneLife';
 
 export const TIMED_RUN_SECONDS = 30 * 60;
 
@@ -9,6 +9,7 @@ export const RUN_MODES: Array<{
   description: string;
 }> = [
   { id: 'normal', icon: '⚔', name: 'Обычный', description: 'Сохранения включены. Спокойный путь к трону.' },
+  { id: 'checkpoint', icon: '✦', name: 'Возрождение', description: 'После смерти забег продолжается с начала текущей локации.' },
   { id: 'hardcore', icon: '☠', name: 'Хардкор', description: 'Без сохранений. Враги сильнее на 35%.' },
   { id: 'timed', icon: '⌛', name: 'На время', description: 'Доберитесь до трона за 30 минут.' },
   { id: 'oneLife', icon: '♥', name: 'Одна жизнь', description: 'Можно продолжить позже, но смерть сотрёт забег.' },

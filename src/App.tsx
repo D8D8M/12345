@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import { Auth } from './components/Auth';
 import { drawWalkingLegs } from './game/drawWalkingLegs';
 import { drawShadowDashGhost, type ShadowDashGhost } from './game/drawShadowDash';
-import { drawEnemyAttack, drawPlayerBow, drawPlayerSword, enemyAttackDuration, enemyWeaponFor } from './game/drawCombatAnimations';
+import { drawEnemyAttack, drawPlayerBow, drawPlayerSword, drawPlayerWeaponHold, enemyAttackDuration, enemyWeaponFor } from './game/drawCombatAnimations';
 import { drawPlayerCape, drawPlayerKnight, drawPlayerLungePose } from './game/drawPlayerKnight';
 import { createTeleportPortals, drawTeleportPortal } from './components/TeleportPortals';
 import { supabase } from './lib/supabase';
@@ -30,7 +30,6 @@ import { DailyChallengeCard } from './components/DailyChallengeCard';
 import { claimDailyReward, dailyProgress, generateDailyChallenge, loadDailyChallenge, loadDailyReward } from './lib/dailyChallenge';
 import { requestBossLine, requestChronicle, requestDeathAdvice, type RunSummary } from './lib/gameAi';
 import { chooseRelics, RELICS, RELIC_SYNERGIES, type Relic, type RelicId } from './game/relics';
-import { RelicChoice } from './components/RelicChoice';
 import { RunMap } from './components/RunMap';
 import type { LocationMapSnapshot, RunMapArchive } from './game/mapTypes';
 import { RunModeChoice } from './components/RunModeChoice';
@@ -51,11 +50,18 @@ import { loadBestRunGhost, saveBestRunGhost, type GhostFrame } from './game/runG
 import { evolveWeapon, weaponBranches, type WeaponBranchId } from './game/weaponUpgrades';
 import { LEGACY_UNLOCKS, emptyLegacyProgress, legacyReward, type LegacyProgress, type LegacyUnlockId } from './game/metaProgression';
 import { LegacyTree } from './components/LegacyTree';
+import { attackDuration, type WeaponKind } from './game/weaponCombatConfig';
+import { meleeConfig, meleeWeaponIdForName, type MeleeWeaponId } from './game/meleeWeaponConfigs';
+import { equipmentConfig, equipmentIdForName, type EquipmentId } from './game/equipmentConfigs';
+import { WeaponManager, type WeaponAnimationState } from './game/weaponSystem';
+import { weaponConfig } from './game/weaponRegistry';
+import { MerchantHub } from './components/MerchantHub';
+import { BOSS_HIT_INVULNERABILITY, BOSS_KNOCKBACK_MULTIPLIER, scaledFreezeDuration } from './game/bossCombat';
 
 type Hud = { hp: number; maxHp: number; shards: number; kills: number; grenade: number; trap: number; message: string };
 type Box = { x: number; y: number; w: number; h: number };
-type GearKind = 'sword' | 'bow' | 'shield' | 'grenade' | 'freeze' | 'trap' | 'empty';
-type Gear = { kind: GearKind; name: string; tier: number; damage: number; cooldown: number; branch?: WeaponBranchId };
+type GearKind = WeaponKind | 'empty';
+type Gear = { kind: GearKind; name: string; tier: number; damage: number; cooldown: number; branch?: WeaponBranchId; weaponId?: MeleeWeaponId; equipmentId?: EquipmentId };
 type WeaponReplacement = { gear: Gear; slots: [number, number]; cost?: number };
 type RunProgress = { hp: number; maxHp: number; damage: number; shards: number; cells?: number; relics: RelicId[]; mapArchive: RunMapArchive; loadout: [Gear, Gear, Gear, Gear] };
 type PermanentProgress = { maxHpBonus: number; damageBonus: number };
@@ -86,7 +92,16 @@ const normalizeSave = (value: unknown): SavedGame | null => {
     legacyProgress: save.legacyProgress ?? emptyLegacyProgress(),
     mode: save.mode ?? 'normal',
     elapsedSeconds: save.elapsedSeconds ?? 0,
-    progress: { ...save.progress, relics: Array.isArray(save.progress.relics) ? save.progress.relics : [], mapArchive: save.progress.mapArchive ?? {} },
+    progress: {
+      ...save.progress,
+      relics: Array.isArray(save.progress.relics) ? save.progress.relics : [],
+      mapArchive: save.progress.mapArchive ?? {},
+      loadout: save.progress.loadout.map((gear) => gear.kind === 'sword' && !gear.weaponId
+        ? { ...gear, weaponId: meleeWeaponIdForName(gear.name) }
+        : gear.kind !== 'empty' && !gear.equipmentId
+          ? { ...gear, equipmentId: equipmentIdForName(gear.name) }
+          : gear) as [Gear, Gear, Gear, Gear],
+    },
   } as SavedGame;
 };
 
@@ -176,15 +191,15 @@ const PLAYER_HIT_INVULNERABILITY = .5;
 const ENEMY_CONTACT_HITBOX_SCALE = .72;
 const BOSS_CONTACT_HITBOX_SCALE = .8;
 const STARTING_LOADOUT: [Gear, Gear, Gear, Gear] = [
-  { kind: 'sword', name: 'Ржавый меч', tier: 1, damage: 18, cooldown: .38 },
-  { kind: 'bow', name: 'Старый лук', tier: 1, damage: 13, cooldown: .65 },
+  { kind: 'sword', weaponId: 'rusty_sword', name: 'Ржавый меч', tier: 1, damage: 18, cooldown: .38 },
+  { kind: 'bow', equipmentId: 'old_bow', name: 'Старый лук', tier: 1, damage: 13, cooldown: .65 },
   { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 },
   { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 },
 ];
 const BASIC_WEAPONS: Gear[] = [
-  { kind: 'sword', name: 'Ржавый меч', tier: 1, damage: 18, cooldown: .38 },
-  { kind: 'shield', name: 'Старый щит', tier: 1, damage: 10, cooldown: .7 },
-  { kind: 'bow', name: 'Старый лук', tier: 1, damage: 13, cooldown: .65 },
+  { kind: 'sword', weaponId: 'rusty_sword', name: 'Ржавый меч', tier: 1, damage: 18, cooldown: .38 },
+  { kind: 'shield', equipmentId: 'old_shield', name: 'Старый щит', tier: 1, damage: 10, cooldown: .7 },
+  { kind: 'bow', equipmentId: 'old_bow', name: 'Старый лук', tier: 1, damage: 13, cooldown: .65 },
 ];
 const weaponSlots = (gear: Gear): [number, number] => ['sword', 'bow', 'shield'].includes(gear.kind) ? [0, 1] : [2, 3];
 const weaponRange = (gear: Gear) => gear.kind === 'sword' ? 62 : gear.kind === 'bow' ? 720 * 1.5 : gear.kind === 'grenade' || gear.kind === 'freeze' ? 600 * .95 + 150 : gear.kind === 'trap' ? 52 : 0;
@@ -284,7 +299,9 @@ export default function App() {
   const [unlockedAchievements, setUnlockedAchievements] = useState<Set<AchievementId>>(() => new Set(loadAchievements()));
   const unlockedAchievementsRef = useRef(unlockedAchievements);
   const [achievementToast, setAchievementToast] = useState<(typeof ACHIEVEMENTS)[number] | null>(null);
-  const [relicChoices, setRelicChoices] = useState<Relic[]>([]);
+  const [shopVisit, setShopVisit] = useState(0);
+  const [relicClaimedVisit, setRelicClaimedVisit] = useState<number | null>(null);
+  const [alchemistRelicOffers, setAlchemistRelicOffers] = useState<Relic[]>([]);
   const [mapOpen, setMapOpen] = useState(false);
   const [mapArchive, setMapArchive] = useState<RunMapArchive>(() => runProgress.current.mapArchive);
   const mapOpenRef = useRef(false);
@@ -485,7 +502,8 @@ export default function App() {
     ironOathReady.current = true;
     const save = () => {
       if (runMode === 'hardcore') return;
-      const data: SavedGame = { savedAt: new Date().toISOString(), sector, location, permanentProgress: { ...permanentProgress.current }, legacyProgress: { ...legacyProgress, unlocks: [...legacyProgress.unlocks] }, mode: runMode, elapsedSeconds: runElapsed.current, progress: { ...runProgress.current, loadout: runProgress.current.loadout.map((gear) => ({ ...gear })) as [Gear, Gear, Gear, Gear] } };
+      const savedProgress = { ...runProgress.current, hp: runMode === 'checkpoint' ? runProgress.current.maxHp : runProgress.current.hp, loadout: runProgress.current.loadout.map((gear) => ({ ...gear })) as [Gear, Gear, Gear, Gear] };
+      const data: SavedGame = { savedAt: new Date().toISOString(), sector, location, permanentProgress: { ...permanentProgress.current }, legacyProgress: { ...legacyProgress, unlocks: [...legacyProgress.unlocks] }, mode: runMode, elapsedSeconds: runElapsed.current, progress: savedProgress };
       localStorage.setItem('ashfall-autosave', JSON.stringify(data)); setAutosave(data);
       if (activeSaveSlot !== null) setSaveSlots((current) => {
         const next = [...current]; next[activeSaveSlot] = data; localStorage.setItem('ashfall-save-slots', JSON.stringify(next));
@@ -859,14 +877,14 @@ export default function App() {
     if (cryptLayout || bridgeLayout) { solids.push(...arenaGates); projectileBlockers.push(...arenaGates); }
     type EnemyKind = 'zombie' | 'crossbow' | 'shield' | 'bomber' | 'mage' | 'totem' | 'slime' | 'flyer' | 'wraith' | 'boss' | 'rightHand';
     type EnemyVariant = 'rottenPrisoner' | 'summonedPrisoner' | 'cappedArcher' | 'marshSlime' | 'swampTotem' | 'bogShaman' | 'blindMiner' | 'dynamiteTosser' | 'minecartDefender' | 'clockworkSoldier' | 'gearFlyer' | 'towerSniper' | 'wraith' | 'necromancer' | 'cryptTotem' | 'bridgeKnight' | 'gargoyleBomber' | 'royalGuard' | 'royalSorcerer' | 'swampGiant' | 'stoneGolem' | 'cryptWarden' | 'bridgeColossus' | 'rightHand';
-    type StatusKind = 'burning' | 'poisoned' | 'electrified';
+    type StatusKind = 'burning' | 'poisoned' | 'electrified' | 'bleeding';
     type StatusEffect = { life: number; tick: number; stacks: number; maskProgress?: number };
     type StatusState = Partial<Record<StatusKind, StatusEffect>>;
     type Enemy = Box & { kind: EnemyKind; variant: EnemyVariant; name: string; vx: number; vy: number; patrolSpeed: number; hp: number; maxHp: number; left: number; right: number; homeY: number; facing: number; alert: number; alertTimer: number; sawPlayer: boolean; turnDelay: number; hurt: number; attack: number; cooldown: number; blocked: number; stunned: number; frozen?: number; statuses?: StatusState; guardTriggered: boolean; defeated: boolean; dead: boolean; dormant?: boolean; specialAttack?: 1 | 2; specialPhase?: number; phaseTwo?: boolean; phaseTransition?: number; elite?: EliteModifier; eliteCooldown?: number; footstepBeat?: number; bossImpactDone?: boolean; spellX?: number; spellY?: number };
     const enemyHurtbox = (enemy: Enemy): Box => enemy.variant === 'bridgeColossus'
       ? { x: enemy.facing > 0 ? enemy.x - 22 : enemy.x - 68, y: enemy.y + 25, w: 210, h: 88 }
       : enemy;
-    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'trapArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean; originX?: number };
+    type Projectile = Box & { vx: number; vy: number; life: number; damage: number; kind: 'arrow' | 'grenade' | 'freeze' | 'enemyArrow' | 'trapArrow' | 'enemyBomb' | 'magicOrb' | 'poisonBurst' | 'gear' | 'wardenSkull' | 'fallingRock'; owner?: Enemy; bounces?: number; reflected?: boolean; originX?: number; blastRadius?: number; freezeSeconds?: number; branch?: WeaponBranchId; pierces?: number };
     type RockWarning = Box & { life: number; delay: number };
     type BossWarning = Box & { life: number; delay: number; hit: boolean; kind: 'spike' | 'geyser' };
     type Hazard = Box & { life: number; kind: 'poison' | 'fire'; tick: number; delay: number };
@@ -1210,7 +1228,9 @@ export default function App() {
       if (embedded || !supported) enemies.splice(index, 1);
     }
     const trialBoss = currentTrial ? enemies.find((enemy) => enemy.kind === 'boss' || enemy.kind === 'rightHand') : undefined;
-    const player = { x: trialBoss ? Math.max(trialBoss.left + 30, trialBoss.x - 240) : spawnX, y: trialBoss ? trialBoss.homeY + trialBoss.h - 56 : spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, bounceLock: 0, bow: 0, bowMax: 0, guard: 0, guardAge: 0, parry: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, landSquashMax: 0, trailTimer: 0, dustTimer: 0, statuses: {} as StatusState, dead: false };
+    const player = { x: trialBoss ? Math.max(trialBoss.left + 30, trialBoss.x - 240) : spawnX, y: trialBoss ? trialBoss.homeY + trialBoss.h - 56 : spawnY, w: 34, h: 56, vx: 0, vy: 0, facing: 1, grounded: false, jumps: 0, hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, soul: 0, focus: 0, focusBroken: false, roll: 0, rollCd: 0, attack: 0, attackMax: 0, attackDirection: 0, attackFacing: 1, attackStage: 0, attackHitDone: false, attackGear: null as Gear | null, comboNext: 0, comboExpires: 0, bounceLock: 0, bow: 0, bowMax: 0, bowFired: false, bowGear: null as Gear | null, guard: 0, guardAge: 0, parry: 0, hurt: 0, controlLock: 0, drop: 0, landSquash: 0, landSquashMax: 0, trailTimer: 0, dustTimer: 0, statuses: {} as StatusState, dead: false };
+    const weaponManager = new WeaponManager();
+    let weaponAnimationState: WeaponAnimationState = 'idle';
     const bossKillCount = ['swampGiant', 'stoneGolem', 'cryptWarden', 'bridgeColossus', 'rightHand'].reduce((total, id) => total + (bestiaryProgress[id] ?? 0), 0);
     const earnedTrialTier = trialRewardTier(loadBossTrialProgress().seals);
     const baseCosmetic = cosmeticForProgress(unlockedAchievements.size, bossKillCount);
@@ -1239,12 +1259,12 @@ export default function App() {
       : [...terrain, ...oneWays].sort(() => Math.random() - .5).slice(0, 1));
     const powerUps: PowerUp[] = powerUpPlatforms.map((platform) => ({ x: platform.x + 25 + Math.random() * Math.max(1, platform.w - 70), y: platform.y - 28, w: 24, h: 24, kind: 'health', collected: false, phase: Math.random() * Math.PI * 2 }));
     const lootTemplates: Gear[] = [
-      { kind: 'sword', name: 'Стальной клинок', tier: sector + 1, damage: 25 + sector * 5, cooldown: .32 },
-      { kind: 'bow', name: 'Охотничий лук', tier: sector + 1, damage: 19 + sector * 4, cooldown: .52 },
-      { kind: 'shield', name: 'Башенный щит', tier: sector + 1, damage: 12 + sector * 3, cooldown: .7 },
-      { kind: 'grenade', name: 'Осколочная бомба', tier: sector, damage: 45 + sector * 6, cooldown: 5 },
-      { kind: 'freeze', name: 'Ледяная бомба', tier: sector, damage: 24 + sector * 4, cooldown: 6 },
-      { kind: 'trap', name: 'Зубастый капкан', tier: sector, damage: 38 + sector * 5, cooldown: 8 },
+      { kind: 'sword', weaponId: 'steel_blade', name: 'Стальной клинок', tier: sector + 1, damage: 25 + sector * 5, cooldown: .32 },
+      { kind: 'bow', equipmentId: 'hunter_bow', name: 'Охотничий лук', tier: sector + 1, damage: 19 + sector * 4, cooldown: .52 },
+      { kind: 'shield', equipmentId: 'tower_shield', name: 'Башенный щит', tier: sector + 1, damage: 12 + sector * 3, cooldown: .7 },
+      { kind: 'grenade', equipmentId: 'fragmentation_bomb', name: 'Осколочная бомба', tier: sector, damage: 45 + sector * 6, cooldown: 5 },
+      { kind: 'freeze', equipmentId: 'ice_bomb', name: 'Ледяная бомба', tier: sector, damage: 24 + sector * 4, cooldown: 6 },
+      { kind: 'trap', equipmentId: 'toothed_trap', name: 'Зубастый капкан', tier: sector, damage: 38 + sector * 5, cooldown: 8 },
     ];
     const sectorLoot = location === 'throne' ? [] : [...lootTemplates].sort(() => Math.random() - .5).slice(0, 2);
     const deadEndRewardRooms = deadEndRooms.filter((room) => !exitRoomIds.has(room.id));
@@ -1275,9 +1295,9 @@ export default function App() {
       });
     };
     const explorationWeapons: Gear[] = [
-      { kind: 'sword', name: 'Ледяной меч', tier: sector + 2, damage: 39 + sector * 6, cooldown: .42 },
-      { kind: 'sword', name: 'Тяжёлый топор', tier: sector + 2, damage: 55 + sector * 7, cooldown: .68 },
-      { kind: 'sword', name: 'Быстрые кинжалы', tier: sector + 2, damage: 27 + sector * 5, cooldown: .2 },
+      { kind: 'sword', weaponId: 'ice_sword', name: 'Ледяной меч', tier: sector + 2, damage: 39 + sector * 6, cooldown: .42 },
+      { kind: 'sword', weaponId: 'heavy_axe', name: 'Тяжёлый топор', tier: sector + 2, damage: 55 + sector * 7, cooldown: .68 },
+      { kind: 'sword', weaponId: 'fast_daggers', name: 'Быстрые кинжалы', tier: sector + 2, damage: 27 + sector * 5, cooldown: .2 },
     ];
     const explorationRewards: ExplorationReward[] = [...(swampLevel?.rewardNodes ?? []).flatMap((platform): ExplorationReward[] => {
       // Exploration is usually worthwhile, but an occasional empty endpoint
@@ -1299,7 +1319,7 @@ export default function App() {
       x: secret.reward.x, y: secret.reward.y, w: secret.reward.w, h: secret.reward.h,
       kind: index === 1 ? 'weaponPedestal' : 'goldChest', collected: false, phase: index * 2.1,
       shardValue: secret.reward.kind === 'shardCache' ? 42 : 30 + sector * 4,
-      gear: index === 1 ? { kind: 'sword', name: 'Клинок забытого короля', tier: 7, damage: 82, cooldown: .34 } : undefined,
+      gear: index === 1 ? { kind: 'sword', weaponId: 'forgotten_king_blade', name: 'Клинок забытого короля', tier: 7, damage: 82, cooldown: .34 } : undefined,
       lore: [
         'Фрагмент летописи: «Король запечатал нижние залы, когда камни впервые начали шептать».',
         'Фрагмент летописи: «Клинок не выбирал наследника — он запоминал каждого павшего».',
@@ -1384,7 +1404,7 @@ export default function App() {
       window.setTimeout(() => {
         bossDeathLineOpen.current = false; setStoryMessage('');
         if (currentTrial) { bossTrialRef.current = null; setBossTrial(null); setStarted(false); setMainMenuScreen('trials'); pausedRef.current = false; setPaused(false); }
-        else offerBossRelic();
+        else { pausedRef.current = false; setPaused(false); }
       }, 3200);
     };
     const clampCamera = (value: number, worldSize: number, viewportSize: number) => Math.max(0, Math.min(value, Math.max(0, worldSize - viewportSize)));
@@ -1394,7 +1414,7 @@ export default function App() {
       && enemy.x <= camera + viewW + margin
       && enemy.y + enemy.h >= cameraY - margin
       && enemy.y <= cameraY + viewH + margin;
-    let grenadeCd = 0, trapCd = 0, kills = 0, shards = runProgress.current.shards, last = performance.now(), gameTime = 0, hitstopUntil = 0, raf = 0, uiTimer = 0, shake = 0, flash = 0, spikeFade = 0, spikeCooldown = 0, poisonTick = 0, hazardRecovery = 0, hazardTeleported = false, safeGroundTime = 0, activeDoor: Door | null = null, stageTwoArenaLocked = throneScene, stageFourArenaLocked = cryptLayout || bridgeLayout, finaleSequence = 0, finaleTimer = 0, finaleBeat = 0, throneGateOpen = false, throneGateNotice = false, servantX = startRoom.x + 70;
+    let grenadeCd = 0, trapCd = 0, kills = 0, shards = runProgress.current.shards, last = performance.now(), gameTime = 0, hitstopUntil = 0, raf = 0, uiTimer = 0, shake = 0, flash = 0, spikeFade = 0, spikeCooldown = 0, hazardRecovery = 0, hazardTeleported = false, safeGroundTime = 0, activeDoor: Door | null = null, stageTwoArenaLocked = throneScene, stageFourArenaLocked = cryptLayout || bridgeLayout, finaleSequence = 0, finaleTimer = 0, finaleBeat = 0, throneGateOpen = false, throneGateNotice = false, servantX = startRoom.x + 70;
     let combo = EMPTY_COMBO, vampireHitCount = 0;
     const torches = Array.from({ length: 42 }, (_, i) => ({ x: 110 + i * 247 + Math.random() * 90, y: 145 + Math.random() * (worldH - 260), phase: Math.random() * Math.PI * 2 }));
     const chains = [...terrain, ...oneWays].filter(() => Math.random() > .72).map((tile) => ({ x: tile.x + 22 + Math.random() * Math.max(10, tile.w - 44), y: tile.y + tile.h, length: 45 + Math.random() * 105 }));
@@ -1538,6 +1558,7 @@ export default function App() {
       burning: { duration: 4.5, interval: .7, color: '#fb6a32', symbol: '▲' },
       poisoned: { duration: 6, interval: 1, color: '#a3e635', symbol: '●' },
       electrified: { duration: 2.4, interval: .6, color: '#60e7ff', symbol: 'ϟ' },
+      bleeding: { duration: 4.2, interval: .65, color: '#fb7185', symbol: '◆' },
     };
     const applyStatus = (target: { statuses?: StatusState }, kind: StatusKind, stacks = 1) => {
       const current = target.statuses?.[kind], config = statusConfig[kind];
@@ -1546,6 +1567,7 @@ export default function App() {
     };
     const damageEnemy = (enemy: Enemy, damage: number, direction: number, sourceX: number, grantsSoul = false, bypassGuard = false) => {
       if (enemy.dead || enemy.dormant || enemy.hurt > 0) return;
+      const isBoss = enemy.kind === 'boss' || enemy.kind === 'rightHand';
       const wasFrozen = (enemy.frozen ?? 0) > 0;
       enemy.frozen = 0;
       if (protectedByTotem(enemy)) { enemy.blocked = .22; shake = 2; burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#67e8f9', 7); return; }
@@ -1553,7 +1575,13 @@ export default function App() {
       if (enemy.kind === 'shield' && enemy.stunned <= 0 && sourceInFront && !bypassGuard) { enemy.blocked = .22; shake = 2; burst(enemy.x + enemy.w / 2 + enemy.facing * 18, enemy.y + 22, '#fde68a', 5); return; }
       if (enemy.variant === 'royalGuard' && sourceInFront && !bypassGuard) { damage *= .5; enemy.guardTriggered = true; }
       const berserkerBonus = runProgress.current.relics.includes('berserker_sigil') && player.hp <= player.maxHp / 2 ? 1.35 : 1;
-      enemy.hp -= damage * runProgress.current.damage * berserkerBonus * eliteDamageMultiplier(enemy.elite); enemy.hurt = .16; enemy.x += direction * 18; enemy.stunned = Math.max(enemy.stunned, .08); shake = Math.max(shake, damage >= 35 ? 8 : 5);
+      enemy.hp -= damage * runProgress.current.damage * berserkerBonus * eliteDamageMultiplier(enemy.elite);
+      enemy.hurt = isBoss ? BOSS_HIT_INVULNERABILITY : .16;
+      enemy.x += direction * 18 * (isBoss ? BOSS_KNOCKBACK_MULTIPLIER : 1);
+      // Ordinary enemies flinch on every hit. Bosses keep winding up, so holding
+      // the attack button cannot permanently cancel all of their attacks.
+      if (!isBoss) enemy.stunned = Math.max(enemy.stunned, .08);
+      shake = Math.max(shake, damage >= 35 ? 8 : 5);
       if ((enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.phaseTwo && enemy.hp > 0 && enemy.hp <= enemy.maxHp * .5) {
         enemy.phaseTwo = true; enemy.phaseTransition = 1.35; enemy.cooldown = 0; enemy.attack = 0; enemy.stunned = 1.05;
         flash = .42; shake = 22; burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#fb7185', 52);
@@ -1651,23 +1679,24 @@ export default function App() {
       }
       return true;
     };
-    const attackSword = (gear: Gear) => {
-      if (player.attack > 0 || player.dead) return;
+    const performSwordHit = (gear: Gear) => {
+      const melee = meleeConfig(gear.weaponId);
+      const attackStep = melee.attacks[player.attackStage];
+      const finisher = player.attackStage === melee.attacks.length - 1;
       const counterReady = player.parry >= 100;
-      player.attack = gear.cooldown;
-      player.attackMax = gear.cooldown;
-      player.attackFacing = player.facing;
       const up = keys.has(settingsRef.current.bindings.up);
       const down = !player.grounded && keys.has(settingsRef.current.bindings.down);
-      player.attackDirection = down ? 1 : up ? -1 : 0;
+      const evolutionScale = gear.branch === 'brutal' && finisher ? 1.35 : 1;
+      const range = 62 * attackStep.hitboxScale * evolutionScale;
       const hit: Box = down
-        ? { x: player.x - 12, y: player.y + player.h - 3, w: player.w + 24, h: 68 }
+        ? { x: player.x - 12, y: player.y + player.h - 3, w: player.w + 24, h: 68 * attackStep.hitboxScale }
         : up
-        ? { x: player.x - 12, y: player.y - 65, w: player.w + 24, h: 68 }
-        : { x: player.facing > 0 ? player.x + player.w : player.x - 62, y: player.y + 4, w: 62, h: 48 };
+        ? { x: player.x - 12, y: player.y - 65 * attackStep.hitboxScale, w: player.w + 24, h: 68 * attackStep.hitboxScale }
+        : { x: player.attackFacing > 0 ? player.x + player.w : player.x - range, y: player.y + 4, w: range, h: 48 };
       let hitEnemy = false;
-      enemies.forEach((enemy) => { if (!enemy.dead && overlap(hit, enemyHurtbox(enemy))) { hitEnemy = true; damageEnemy(enemy, gear.damage * (counterReady ? 3 : 1), up || down ? Math.sign(enemy.x - player.x) || player.facing : player.facing, player.x + player.w / 2, true, counterReady); } });
-      crossbowStatues.forEach((statue) => { if (!statue.dead && overlap(hit, statue)) { hitEnemy = damageCrossbowStatue(statue, gear.damage * (counterReady ? 3 : 1)) || hitEnemy; } });
+      const strikeDamage = gear.damage * attackStep.damageMultiplier * (attackStep.criticalMultiplier ?? 1) * (counterReady ? 3 : 1);
+      enemies.forEach((enemy) => { if (!enemy.dead && overlap(hit, enemyHurtbox(enemy))) { hitEnemy = true; const direction = up || down ? Math.sign(enemy.x - player.x) || player.attackFacing : player.attackFacing; const bossTarget = enemy.kind === 'boss' || enemy.kind === 'rightHand'; const execute = gear.branch === 'brutal' && finisher && enemy.hp <= enemy.maxHp * .25; damageEnemy(enemy, execute ? Math.max(strikeDamage, enemy.hp + 1) : strikeDamage, direction, player.x + player.w / 2, true, counterReady || execute); if (gear.branch === 'swift') applyStatus(enemy, 'electrified', finisher ? 2 : 1); if (gear.branch === 'brutal' && finisher && !enemy.dead) applyStatus(enemy, 'bleeding', 2); if (attackStep.freezeSeconds) enemy.frozen = Math.max(enemy.frozen ?? 0, scaledFreezeDuration(attackStep.freezeSeconds, bossTarget)); enemy.x += direction * Math.max(0, attackStep.knockback - 250) * .06 * (bossTarget ? BOSS_KNOCKBACK_MULTIPLIER : 1); } });
+      crossbowStatues.forEach((statue) => { if (!statue.dead && overlap(hit, statue)) { hitEnemy = damageCrossbowStatue(statue, strikeDamage) || hitEnemy; } });
       if (counterReady && hitEnemy) { player.parry = 0; shake = 12; flash = .12; burst(player.x + player.w / 2, player.y + 20, '#fde68a', 26); }
       if (down && hitEnemy) {
         player.vy = -DOWN_STRIKE_BOUNCE_SPEED; player.grounded = false; player.bounceLock = .5;
@@ -1686,25 +1715,57 @@ export default function App() {
       });
       if (hitEnemy) flash = Math.max(flash, .035);
     };
-    const shoot = (gear: Gear) => {
-      if (player.bow > 0 || player.dead) return;
-      player.bow = gear.cooldown;
-      player.bowMax = gear.cooldown;
+    const attackSword = (gear: Gear) => {
+      if (player.attack > 0 || player.dead) return;
+      const config = meleeConfig(gear.weaponId);
+      if (gameTime > player.comboExpires) player.comboNext = 0;
+      player.attackStage = player.comboNext;
+      player.comboNext = (player.comboNext + 1) % config.attacks.length;
+      const attackStep = config.attacks[player.attackStage];
+      player.attack = attackDuration(attackStep);
+      player.comboExpires = gameTime + player.attack + config.comboResetWindow;
+      player.attackMax = player.attack;
+      player.attackHitDone = false;
+      player.attackGear = gear;
+      player.attackFacing = player.facing;
+      const up = keys.has(settingsRef.current.bindings.up);
+      const down = !player.grounded && keys.has(settingsRef.current.bindings.down);
+      player.attackDirection = down ? 1 : up ? -1 : 0;
+    };
+    const fireBow = (gear: Gear) => {
+      const config = equipmentConfig(gear.equipmentId, 'bow');
+      if (config.kind !== 'bow') return;
       const arrowX = player.x + (player.facing > 0 ? 32 : -12);
       const hunterVerdict = runProgress.current.relics.includes('hunter_eye') && runProgress.current.relics.includes('executioner_chain') ? 1.25 : 1;
-      projectiles.push({ x: arrowX, y: player.y + 22, w: 18, h: 4, vx: player.facing * 720, vy: 0, life: 1.5, damage: gear.damage * hunterVerdict, kind: 'arrow', originX: arrowX });
+      for (let shot = 0; shot < config.shots; shot++) {
+        const offset = shot - (config.shots - 1) / 2;
+        projectiles.push({ x: arrowX, y: player.y + 22 + offset * 4, w: 18, h: 4, vx: player.facing * config.projectileSpeed, vy: offset * config.spread * config.projectileSpeed, life: 1.5, damage: gear.damage * config.damageMultiplier * hunterVerdict, kind: 'arrow', originX: arrowX, branch: gear.branch, pierces: gear.branch === 'sniper' ? 1 : 0 });
+      }
+    };
+    const shoot = (gear: Gear) => {
+      if (player.bow > 0 || player.dead) return;
+      const config = equipmentConfig(gear.equipmentId, 'bow');
+      if (config.kind !== 'bow') return;
+      player.bow = config.charge + config.recovery;
+      player.bowMax = player.bow;
+      player.bowFired = false;
+      player.bowGear = gear;
     };
     const grenade = (gear: Gear, slot: number) => {
       const remaining = slot === 2 ? grenadeCd : trapCd;
       if (remaining > 0 || player.dead) { if (remaining > 0) showCombatNotice(`Перезарядка: ${remaining.toFixed(1)} с`, 'cooldown', 650); return; }
       if (slot === 2) grenadeCd = gear.cooldown; else trapCd = gear.cooldown;
-      projectiles.push({ x: player.x + 12, y: player.y + 12, w: 14, h: 14, vx: player.facing * 600, vy: -90, life: .95, damage: gear.damage, kind: gear.kind === 'freeze' ? 'freeze' : 'grenade' });
+      const config = equipmentConfig(gear.equipmentId, gear.kind);
+      if (config.kind !== 'grenade' && config.kind !== 'freeze') return;
+      projectiles.push({ x: player.x + 12, y: player.y + 12, w: 14, h: 14, vx: player.facing * config.projectileSpeed, vy: -90, life: .95 + config.windup, damage: gear.damage * config.damageMultiplier, kind: gear.kind === 'freeze' ? 'freeze' : 'grenade', blastRadius: config.blastRadius, freezeSeconds: config.freezeSeconds, branch: gear.branch });
     };
     const placeTrap = (gear: Gear, slot: number) => {
       const remaining = slot === 2 ? grenadeCd : trapCd;
       if (remaining > 0 || player.dead) { if (remaining > 0) showCombatNotice(`Перезарядка: ${remaining.toFixed(1)} с`, 'cooldown', 650); return; }
       if (slot === 2) grenadeCd = gear.cooldown; else trapCd = gear.cooldown;
-      traps.push({ x: player.x - 8, y: player.y + player.h - 10, w: 52, h: 12, life: 7, damage: gear.damage, triggered: false });
+      const config = equipmentConfig(gear.equipmentId, 'trap');
+      if (config.kind !== 'trap') return;
+      traps.push({ x: player.x - (config.width - player.w) / 2, y: player.y + player.h - 10, w: config.width, h: 12, life: config.lifetime, damage: gear.damage * config.damageMultiplier, triggered: false });
     };
     const useSelectedGear = () => {
       if (player.focus > 0) return;
@@ -1721,14 +1782,20 @@ export default function App() {
       if (player.focus > 0) { player.focus = 0; player.focusBroken = true; burst(player.x + player.w / 2, player.y + 20, '#d7f7ef', 8); }
       const attackInFront = player.facing > 0 ? sourceX > player.x : sourceX < player.x + player.w;
       if (!ignoreGuard && player.guard > 0 && attackInFront) {
-        if (player.guardAge <= .2) {
-          player.parry = Math.min(100, player.parry + (meleeAttacker ? 34 : 20));
+        const heldShield = runProgress.current.loadout[selectedSlot.current];
+        const shieldConfig = equipmentConfig(heldShield.equipmentId, 'shield');
+        const perfectWindow = shieldConfig.kind === 'shield' ? shieldConfig.perfectBlockWindow : .2;
+        const parryGain = shieldConfig.kind === 'shield' ? shieldConfig.parryGain : 34;
+        if (player.guardAge <= perfectWindow) {
+          player.parry = Math.min(100, player.parry + (meleeAttacker ? parryGain : parryGain * .6));
           if (meleeAttacker) { meleeAttacker.stunned = 1.15; meleeAttacker.attack = 0; meleeAttacker.vx = 0; if (meleeAttacker.variant === 'clockworkSoldier' || meleeAttacker.variant === 'gearFlyer') applyStatus(meleeAttacker, 'electrified', 2); }
+          if (heldShield.branch === 'reprisal' && meleeAttacker) { damageEnemy(meleeAttacker, heldShield.damage * 1.5, -meleeAttacker.facing, player.x + player.w / 2, false, true); burst(meleeAttacker.x + meleeAttacker.w / 2, meleeAttacker.y + 20, '#fde68a', 18); }
           if (runProgress.current.relics.includes('mirror_shield') && runProgress.current.relics.includes('wind_feather')) player.rollCd = 0;
           showCombatNotice(player.parry >= 100 ? 'Идеальный блок — контрудар готов!' : 'Идеальный блок', 'parry');
           shake = 5; burst(player.x + player.w / 2 + player.facing * 20, player.y + 24, '#fff7ae', 14); return;
         }
         shake = 3; burst(player.x + player.w / 2 + player.facing * 18, player.y + 24, '#fde68a', 7);
+        if (heldShield.branch === 'bastion') { player.parry = Math.min(100, player.parry + 8); return; }
       }
       const maskDamage = forcedMaskDamage ?? (meleeAttacker?.kind === 'boss' || meleeAttacker?.kind === 'rightHand' ? 2 : 1);
       const damagedRoom = roomAt(player.x + player.w / 2, player.y + player.h / 2); if (damagedRoom !== undefined) damagedRooms.add(damagedRoom);
@@ -1751,7 +1818,7 @@ export default function App() {
         const cause = meleeAttacker?.name || (ignoreGuard ? 'опасность окружения' : 'дальний удар');
         runStats.current.deathCause = cause; setDeathQuote(DEATH_QUOTES[Math.floor(Math.random() * DEATH_QUOTES.length)]);
         setDeathSummary({ ...runStats.current, seconds: Math.floor(runElapsed.current), shards, location, sector, relics: [...runProgress.current.relics] });
-        if (!legacyAwarded.current) { legacyAwarded.current = true; setLegacyProgress((current) => ({ ...current, embers: current.embers + legacyReward(runStats.current.kills, runStats.current.bossesDefeated) })); }
+        if (runMode !== 'checkpoint' && !legacyAwarded.current) { legacyAwarded.current = true; setLegacyProgress((current) => ({ ...current, embers: current.embers + legacyReward(runStats.current.kills, runStats.current.bossesDefeated) })); }
         setDeathScreen('stats');
         setDeathAdvice(''); setDeathAdviceLoading(true);
         void requestDeathAdvice(summarizeRun(cause)).then(setDeathAdvice).finally(() => setDeathAdviceLoading(false));
@@ -1768,7 +1835,7 @@ export default function App() {
         effect.life -= dt; effect.tick -= dt;
         if (kind === 'electrified') enemy.stunned = Math.max(enemy.stunned, .08);
         if (effect.tick <= 0 && !enemy.dead) {
-          const damage = kind === 'burning' ? 5 : kind === 'poisoned' ? 4 : 3;
+          const damage = kind === 'burning' ? 5 : kind === 'poisoned' ? 4 : kind === 'bleeding' ? 7 : 3;
           damageEnemy(enemy, damage * effect.stacks, 0, enemy.x + enemy.w / 2, false, true);
           burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, statusConfig[kind].color, 5 + effect.stacks * 2);
           if (kind === 'electrified') for (const other of enemies) {
@@ -1804,7 +1871,7 @@ export default function App() {
     const recoverFromHazard = (sourceX: number) => {
       if (hazardRecovery > 0 || player.dead) return;
       const hpBeforeHit = player.hp;
-      damagePlayer(1, sourceX, undefined, 1, true);
+      damagePlayer(1, sourceX, undefined, 1, true, true);
       if (player.dead || player.hp === hpBeforeHit) return;
       const checkpointFeet = checkpoint.y + player.h;
       const respawnPlatforms = [...terrain, ...oneWays].filter((platform) =>
@@ -1841,6 +1908,11 @@ export default function App() {
       keys.clear(); pressed.clear();
     };
     const reset = () => {
+      if (runMode === 'checkpoint') {
+        runProgress.current.hp = runProgress.current.maxHp;
+        setDeathSummary(null); setDeathScreen('stats'); setRunKey((n) => n + 1);
+        return;
+      }
       runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0);
       setHud({ hp: runProgress.current.hp, maxHp: runProgress.current.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
       setLocation('prison'); setSector(1); setRunKey((n) => n + 1);
@@ -1849,7 +1921,7 @@ export default function App() {
     const keyDown = (e: KeyboardEvent) => {
       if (e.code === 'Tab') {
         e.preventDefault();
-        if (weaponReplacementOpen.current || relicChoiceOpen.current || bossDeathLineOpen.current || settingsOpenRef.current) return;
+        if (weaponReplacementOpen.current || bossDeathLineOpen.current || settingsOpenRef.current) return;
         const nextOpen = !mapOpenRef.current;
         if (nextOpen) saveMapSnapshot();
         mapOpenRef.current = nextOpen; setMapOpen(nextOpen); setMapArchive({ ...runProgress.current.mapArchive });
@@ -1857,7 +1929,7 @@ export default function App() {
         return;
       }
       if (e.code === 'Escape') {
-        if (weaponReplacementOpen.current || relicChoiceOpen.current || bossDeathLineOpen.current) return;
+        if (weaponReplacementOpen.current || bossDeathLineOpen.current) return;
         if (pauseBestiaryOpenRef.current) { e.preventDefault(); pauseBestiaryOpenRef.current = false; setPauseBestiaryOpen(false); return; }
         if (mapOpenRef.current) { e.preventDefault(); mapOpenRef.current = false; setMapOpen(false); pausedRef.current = false; setPaused(false); return; }
         if (settingsOpenRef.current) { e.preventDefault(); settingsOpenRef.current = false; setSettingsOpen(false); return; }
@@ -1873,14 +1945,14 @@ export default function App() {
       keys.add(e.code);
       const slotCodes = [settingsRef.current.bindings.slot1, settingsRef.current.bindings.slot2, settingsRef.current.bindings.slot3, settingsRef.current.bindings.slot4];
       const slot = slotCodes.indexOf(e.code);
-      if (slot >= 0) { selectedSlot.current = slot; setActiveSlot(slot); playUiSound(settingsRef.current.effectsVolume, 'select'); }
-      if (e.code === settingsRef.current.bindings.attack) useSelectedGear();
+      if (slot >= 0) { selectedSlot.current = slot; weaponManager.reset(); setActiveSlot(slot); playUiSound(settingsRef.current.effectsVolume, 'select'); }
+      if (e.code === settingsRef.current.bindings.attack) { const gear = runProgress.current.loadout[selectedSlot.current]; if (gear.kind === 'sword' || gear.kind === 'bow') weaponManager.setAttackHeld(true); else useSelectedGear(); }
       if (e.code === 'KeyR' && player.dead) reset();
     };
-    const keyUp = (e: KeyboardEvent) => keys.delete(e.code);
+    const keyUp = (e: KeyboardEvent) => { keys.delete(e.code); if (e.code === settingsRef.current.bindings.attack) weaponManager.setAttackHeld(false); };
     let mouseHeld = false;
-    const mouseDown = (e: MouseEvent) => { if (!pausedRef.current && e.button === 0) { e.preventDefault(); mouseHeld = true; const gear = runProgress.current.loadout[selectedSlot.current]; if (gear.kind === 'shield') { player.guard = 1; player.guardAge = 0; } else useSelectedGear(); } };
-    const mouseUp = (e: MouseEvent) => { if (e.button === 0) { mouseHeld = false; player.guard = 0; player.guardAge = 0; } };
+    const mouseDown = (e: MouseEvent) => { if (!pausedRef.current && e.button === 0) { e.preventDefault(); mouseHeld = true; const gear = runProgress.current.loadout[selectedSlot.current]; if (gear.kind === 'shield') { player.guard = 1; player.guardAge = 0; } else if (gear.kind === 'sword' || gear.kind === 'bow') weaponManager.setAttackHeld(true); else useSelectedGear(); } };
+    const mouseUp = (e: MouseEvent) => { if (e.button === 0) { mouseHeld = false; weaponManager.setAttackHeld(false); player.guard = 0; player.guardAge = 0; } };
     window.addEventListener('keydown', keyDown); window.addEventListener('keyup', keyUp);
     window.addEventListener('mouseup', mouseUp);
     canvas.addEventListener('mousedown', mouseDown);
@@ -1988,6 +2060,25 @@ export default function App() {
         }
       }
       player.roll -= dt; player.rollCd -= dt * (runProgress.current.relics.includes('wind_feather') ? 1.54 : 1); player.attack -= dt; player.bounceLock -= dt; player.bow -= dt; player.hurt -= dt; player.controlLock -= dt; player.drop -= dt; player.landSquash -= dt; player.trailTimer -= dt; player.dustTimer -= dt; grenadeCd -= dt; trapCd -= dt; flash -= dt; spikeFade -= dt; spikeCooldown -= dt;
+      if (player.attackGear?.kind === 'sword' && !player.attackHitDone) {
+        const attackStep = meleeConfig(player.attackGear.weaponId).attacks[player.attackStage];
+        const elapsed = player.attackMax - Math.max(0, player.attack);
+        if (elapsed >= attackStep.windup) { player.attackHitDone = true; performSwordHit(player.attackGear); }
+      }
+      if (player.bowGear && !player.bowFired) {
+        const bowConfig = equipmentConfig(player.bowGear.equipmentId, 'bow');
+        if (bowConfig.kind === 'bow' && player.bowMax - Math.max(0, player.bow) >= bowConfig.charge) { player.bowFired = true; fireBow(player.bowGear); }
+      }
+      const heldGearKind = runProgress.current.loadout[selectedSlot.current].kind;
+      const managedGear = runProgress.current.loadout[selectedSlot.current];
+      const managedId = managedGear.weaponId ?? managedGear.equipmentId;
+      const managedConfig = managedId ? weaponConfig(managedId) : undefined;
+      if (managedConfig && (heldGearKind === 'sword' || heldGearKind === 'bow') && !player.dead && player.focus <= 0) {
+        weaponManager.setAttackHeld(mouseHeld || keys.has(settingsRef.current.bindings.attack));
+        const events = weaponManager.update(dt, managedConfig);
+        if (events.some((event) => event.type === 'attack-started')) useSelectedGear();
+        weaponAnimationState = weaponManager.snapshot(managedConfig).state;
+      } else weaponAnimationState = 'idle';
       if (hazardRecovery > 0) {
         hazardRecovery = Math.max(0, hazardRecovery - dt);
         player.controlLock = Math.max(player.controlLock, hazardRecovery); player.vx = 0;
@@ -2003,13 +2094,13 @@ export default function App() {
       if (!focusKeyHeld) player.focusBroken = false;
       const wantsFocus = currentTrial?.modifier !== 'noHealing' && focusKeyHeld && !player.focusBroken && player.soul + .0001 >= SOUL_HEAL_COST && player.hp < player.maxHp;
       if (wantsFocus) {
-        player.focus += dt; player.vx *= Math.max(0, 1 - dt * 16); player.attack = 0; player.bow = 0;
+        player.focus += dt; player.vx *= Math.max(0, 1 - dt * 16); player.attack = 0; player.bow = 0; player.bowFired = true; player.bowGear = null;
         if (player.focus >= 1) { player.soul = Math.max(0, player.soul - SOUL_HEAL_COST); player.hp = Math.min(player.maxHp, player.hp + 1); runProgress.current.hp = player.hp; player.focus = 0; setSoulHud(player.soul); burst(player.x + player.w / 2, player.y + 20, '#e8fff8', 18); }
       } else player.focus = 0;
       const focusing = player.focus > 0;
       const controlsLocked = player.controlLock > 0;
       const holdingShield = !controlsLocked && (mouseHeld || keys.has(settingsRef.current.bindings.attack)) && runProgress.current.loadout[selectedSlot.current].kind === 'shield';
-      if (holdingShield) { player.guard = 1; player.guardAge += dt; player.vx *= Math.max(0, 1 - dt * 8); }
+      if (holdingShield) { const gear = runProgress.current.loadout[selectedSlot.current]; const config = equipmentConfig(gear.equipmentId, 'shield'); player.guard = 1; player.guardAge += dt; player.vx *= Math.max(0, 1 - dt * (config.kind === 'shield' ? config.movementDamping : 8)); }
       else { player.guard = 0; player.guardAge = 0; }
       const left = keys.has(settingsRef.current.bindings.left), right = keys.has(settingsRef.current.bindings.right);
       if (noClipModeRef.current) {
@@ -2102,9 +2193,9 @@ export default function App() {
           break;
         }
         if (swampLevel && overlap(player, swampLevel.poison)) {
-          poisonTick -= dt;
-          if (poisonTick <= 0) { applyStatus(player, 'poisoned'); poisonTick = .8; burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14); }
-        } else poisonTick = 0;
+          burst(player.x + player.w / 2, SWAMP_WORLD.poisonY + 4, '#b7f52a', 14);
+          recoverFromHazard(player.x + player.w / 2);
+        }
         for (const platform of sinkingPlatforms) {
           const standing = player.grounded && player.x + player.w > platform.collider.x && player.x < platform.collider.x + platform.collider.w
             && Math.abs(player.y + player.h - platform.collider.y) < 6;
@@ -2151,7 +2242,7 @@ export default function App() {
         }
       }
       const shadowDashActive = player.roll > .1;
-      if (shadowDashActive && runProgress.current.relics.includes('frost_shard') && runProgress.current.relics.includes('wind_feather')) for (const enemy of enemies) if (!enemy.dead && overlap(player, enemyHurtbox(enemy)) && (enemy.frozen ?? 0) <= 0) { enemy.frozen = 1.35; burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#67e8f9', 16); }
+      if (shadowDashActive && runProgress.current.relics.includes('frost_shard') && runProgress.current.relics.includes('wind_feather')) for (const enemy of enemies) if (!enemy.dead && overlap(player, enemyHurtbox(enemy)) && (enemy.frozen ?? 0) <= 0) { enemy.frozen = scaledFreezeDuration(1.35, enemy.kind === 'boss' || enemy.kind === 'rightHand'); burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#67e8f9', 16); }
       if (shadowDashActive && player.trailTimer <= 0) { playerGhosts.push({ x: player.x, y: player.y, facing: player.facing, life: .24, maxLife: .24 }); player.trailTimer = .055; }
       if (player.grounded && Math.abs(player.vx) > 95 && player.dustTimer <= 0) { burst(player.x + player.w / 2 - player.facing * 10, player.y + player.h - 2, '#7c8793', 3); player.dustTimer = .11; }
 
@@ -2252,9 +2343,8 @@ export default function App() {
         if (event.kind === 'cursedChest') {
           if (player.hp <= 1) { setStoryMessage('Алтарь требует хотя бы одну маску в жертву.'); continue; }
           player.hp -= 1; runProgress.current.hp = player.hp;
-          const choices = chooseRelics(runProgress.current.relics, 1);
-          if (choices[0]) { runProgress.current.relics.push(choices[0].id); setStoryMessage(`Проклятая сделка: -1 маска, получена реликвия «${choices[0].name}».`); }
-          else { shards += 40; runProgress.current.shards = shards; setStoryMessage('Алтарь отдаёт 40 осколков: все реликвии уже собраны.'); }
+          shards += 40; runProgress.current.shards = shards;
+          setStoryMessage('Проклятый алтарь забирает маску и отдаёт 40 осколков. Реликвии теперь хранит алхимик.');
         } else if (event.kind === 'fountain') {
           if (choseFountainShards) {
             const reward = 18 + sector * 3; shards += reward; runProgress.current.shards = shards;
@@ -2468,6 +2558,16 @@ export default function App() {
           const dx = player.x + player.w / 2 - (p.x + p.w / 2), dy = player.y + player.h / 2 - (p.y + p.h / 2), distance = Math.max(1, Math.hypot(dx, dy));
           const desiredVx = dx / distance * 165, desiredVy = dy / distance * 165, steering = Math.min(1, dt * 2.4);
           p.vx += (desiredVx - p.vx) * steering; p.vy += (desiredVy - p.vy) * steering;
+          const counterProjectile = projectiles.find((other) => other !== p && other.life > 0 && (other.kind === 'arrow' || other.kind === 'grenade' || other.kind === 'freeze') && overlap(p, other));
+          const counterTrap = traps.find((trap) => trap.life > 0 && overlap(p, trap));
+          if (counterProjectile || counterTrap) {
+            p.life = 0;
+            if (counterProjectile?.kind === 'arrow') counterProjectile.life = 0;
+            if (counterTrap) { counterTrap.triggered = true; counterTrap.life = Math.min(counterTrap.life, .35); }
+            burst(p.x + p.w / 2, p.y + p.h / 2, '#c084fc', 12);
+            burst(p.x + p.w / 2, p.y + p.h / 2, '#f8fafc', 7);
+            continue;
+          }
         }
         p.life -= dt; p.vy += (p.kind === 'grenade' || p.kind === 'freeze' || p.kind === 'enemyBomb' || p.kind === 'wardenSkull' || p.kind === 'fallingRock' ? 900 : 0) * dt; p.x += p.vx * dt; p.y += p.vy * dt;
         if (p.kind === 'arrow' && p.life > 0) for (const statue of crossbowStatues) {
@@ -2485,13 +2585,29 @@ export default function App() {
         if (hitWorld && p.kind === 'enemyBomb') { p.x = previousX; p.y = previousY; p.vx *= .55; p.vy = -Math.abs(p.vy) * .38; }
         else if (hitWorld && p.kind === 'gear' && (p.bounces || 0) > 0) { p.x = previousX; p.y = previousY; p.bounces = (p.bounces || 0) - 1; p.vx *= -1; p.vy *= -1; }
         else if (hitWorld) p.life = 0;
-        if (p.life > 0 && !hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, enemyHurtbox(e))) { const longShot = runProgress.current.relics.includes('hunter_eye') && Math.abs(p.x - (p.originX ?? p.x)) >= 360; damageEnemy(e, p.damage * (longShot ? 1.5 : 1), Math.sign(p.vx), p.x, true); p.life = 0; }
+        if (p.life > 0 && !hitWorld && p.kind === 'arrow') for (const e of enemies) if (!e.dead && overlap(p, enemyHurtbox(e))) { const distance = Math.abs(p.x - (p.originX ?? p.x)), relicLongShot = runProgress.current.relics.includes('hunter_eye') && distance >= 360, verdict = p.branch === 'sniper' ? 1 + Math.min(.9, distance / 700) : 1; damageEnemy(e, p.damage * verdict * (relicLongShot ? 1.5 : 1), Math.sign(p.vx), p.x, true, p.branch === 'sniper'); if (p.branch === 'frost' && !e.dead) e.frozen = Math.max(e.frozen ?? 0, scaledFreezeDuration(1.35, e.kind === 'boss' || e.kind === 'rightHand')); if ((p.pierces ?? 0) > 0) p.pierces = (p.pierces ?? 0) - 1; else { p.life = 0; break; } }
         if (!hitWorld && p.kind === 'grenade' && p.life > 0) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemyHurtbox(enemy))) { p.x += p.w / 2; p.y += p.h / 2; p.life = 0; break; }
         if (!hitWorld && (p.kind === 'enemyArrow' || p.kind === 'trapArrow' || p.kind === 'gear' || p.kind === 'poisonBurst') && overlap(p, player)) { if (player.roll <= 0) { damagePlayer(p.damage, p.x); if (p.kind === 'poisonBurst') applyStatus(player, 'poisoned'); else if (p.kind === 'gear') applyStatus(player, 'electrified'); } p.life = 0; }
-        if (p.kind === 'magicOrb' && overlap(p, player)) { if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; burst(p.x, p.y, '#c084fc', 12); }
+        if (p.kind === 'magicOrb' && overlap(p, player)) { if (holdingShield) { burst(p.x, p.y, '#fde68a', 14); player.parry = Math.min(100, player.parry + 35); } else if (player.roll <= 0) damagePlayer(p.damage, p.x); p.life = 0; burst(p.x, p.y, '#c084fc', 12); }
         if ((p.kind === 'wardenSkull' || p.kind === 'fallingRock') && overlap(p, player)) { damagePlayer(p.damage, p.x, p.owner); p.life = 0; burst(p.x, p.y, p.kind === 'wardenSkull' ? '#c084fc' : '#9ca3af', 14); }
         if (p.kind === 'enemyBomb' && p.reflected) for (const enemy of enemies) if (!enemy.dead && overlap(p, enemyHurtbox(enemy))) { const wasAlive = !enemy.dead; damageEnemy(enemy, runProgress.current.relics.includes('mirror_shield') ? 144 : 48, Math.sign(p.vx) || 1, p.x); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); p.life = 0; break; }
-        if ((p.kind === 'grenade' || p.kind === 'freeze') && p.life <= 0) { const hellMix = p.kind === 'grenade' && runProgress.current.relics.includes('powder_seal') && runProgress.current.relics.includes('berserker_sigil'), blastRadius = hellMix ? 188 : 150; enemies.forEach((e) => { const dx = e.x - p.x, dy = e.y - p.y; if (dx * dx + dy * dy < blastRadius * blastRadius) { damageEnemy(e, p.damage * (hellMix ? 1.35 : 1), Math.sign(dx) || 1, p.x); if (p.kind === 'freeze' && !e.dead) e.frozen = 1; else if (!e.dead) applyStatus(e, 'burning', 2); } }); if (p.kind === 'grenade' && runProgress.current.relics.includes('powder_seal')) hazards.push({ x: p.x - 70, y: p.y - 18, w: 140, h: 36, life: 4, tick: 0, delay: 0, kind: 'fire' }); explosions.push({ x: p.x, y: p.y, life: .52, maxLife: .52, radius: blastRadius, kind: p.kind === 'freeze' ? 'freeze' : 'fire' }); burst(p.x, p.y, p.kind === 'freeze' ? '#67e8f9' : '#f5b942', hellMix ? 40 : 28); shake = hellMix ? 19 : 14; }
+        if ((p.kind === 'grenade' || p.kind === 'freeze') && p.life <= 0) {
+          const hellMix = p.kind === 'grenade' && runProgress.current.relics.includes('powder_seal') && runProgress.current.relics.includes('berserker_sigil');
+          const clusterScale = p.branch === 'cluster' ? 1.35 : 1;
+          const blastRadius = (hellMix ? Math.max(188, p.blastRadius ?? 150) : (p.blastRadius ?? 150)) * clusterScale;
+          enemies.forEach((enemy) => {
+            const dx = enemy.x - p.x, dy = enemy.y - p.y;
+            if (dx * dx + dy * dy >= blastRadius * blastRadius) return;
+            const wasFrozen = (enemy.frozen ?? 0) > 0;
+            damageEnemy(enemy, p.damage * (hellMix ? 1.35 : 1) * (p.kind === 'freeze' && p.branch === 'cluster' && wasFrozen ? 1.65 : 1), Math.sign(dx) || 1, p.x, true);
+            if (p.kind === 'freeze' && !enemy.dead) enemy.frozen = scaledFreezeDuration(p.branch === 'alchemist' ? 4.5 : (p.freezeSeconds ?? 1), enemy.kind === 'boss' || enemy.kind === 'rightHand');
+            else if (!enemy.dead) applyStatus(enemy, p.branch === 'alchemist' ? 'poisoned' : 'burning', 2);
+          });
+          if (p.kind === 'grenade' && (runProgress.current.relics.includes('powder_seal') || p.branch === 'alchemist')) hazards.push({ x: p.x - 70, y: p.y - 18, w: 140, h: 36, life: p.branch === 'alchemist' ? 6 : 4, tick: 0, delay: 0, kind: p.branch === 'alchemist' ? 'poison' : 'fire' });
+          if (p.branch === 'cluster') for (let fragment = 0; fragment < 4; fragment++) { const angle = fragment * Math.PI / 2; const x = p.x + Math.cos(angle) * blastRadius * .48, y = p.y + Math.sin(angle) * blastRadius * .48; explosions.push({ x, y, life: .36, maxLife: .36, radius: blastRadius * .38, kind: p.kind === 'freeze' ? 'freeze' : 'fire' }); burst(x, y, p.kind === 'freeze' ? '#cffafe' : '#fde68a', 9); }
+          explosions.push({ x: p.x, y: p.y, life: .52, maxLife: .52, radius: blastRadius, kind: p.kind === 'freeze' ? 'freeze' : 'fire' });
+          burst(p.x, p.y, p.kind === 'freeze' ? '#67e8f9' : '#f5b942', hellMix || p.branch === 'cluster' ? 40 : 28); shake = hellMix || p.branch === 'cluster' ? 19 : 14;
+        }
         if (p.kind === 'enemyBomb' && p.life <= 0) { const dx = player.x + player.w / 2 - p.x, dy = player.y + player.h / 2 - p.y; if (!p.reflected && dx * dx + dy * dy < 135 * 135) { damagePlayer(p.damage, p.x); applyStatus(player, 'burning', 2); } if (p.reflected) enemies.forEach((enemy) => { const ex = enemy.x + enemy.w / 2 - p.x, ey = enemy.y + enemy.h / 2 - p.y; if (!enemy.dead && ex * ex + ey * ey < 135 * 135) { const wasAlive = !enemy.dead; damageEnemy(enemy, runProgress.current.relics.includes('mirror_shield') ? 144 : 48, Math.sign(ex) || 1, p.x); applyStatus(enemy, 'burning', 2); if (wasAlive && enemy.dead && enemy.variant === 'dynamiteTosser') unlockAchievement('return_sender'); } }); explosions.push({ x: p.x, y: p.y, life: .48, maxLife: .48, radius: 145, kind: 'fire' }); burst(p.x, p.y, '#ff7a45', 32); burst(p.x, p.y, '#fde68a', 18); shake = 14; }
       }
       for (const warning of rockWarnings) {
@@ -2518,7 +2634,7 @@ export default function App() {
         shard.x += shard.vx * dt; shard.y += shard.vy * dt;
         if (distance < 28) { shards += shard.value; runProgress.current.shards = shards; if (shards >= 150) unlockAchievement('heavy_wallet'); shard.life = 0; burst(shard.x, shard.y, '#fbbf24', 5); }
       }
-      for (const trap of traps) { trap.life -= dt; for (const e of enemies) if (!e.dead && !trap.triggered && overlap(trap, enemyHurtbox(e))) { trap.triggered = true; trap.life = .35; e.vx *= .15; damageEnemy(e, trap.damage, Math.sign(e.x - trap.x), trap.x + trap.w / 2); } }
+      for (const trap of traps) { trap.life -= dt; for (const e of enemies) if (!e.dead && !trap.triggered && overlap(trap, enemyHurtbox(e))) { trap.triggered = true; trap.life = .35; e.vx *= .15; damageEnemy(e, trap.damage, Math.sign(e.x - trap.x), trap.x + trap.w / 2, true); } }
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant && enemyNearViewport(enemy)) applyEnemyGravity(enemy, dt);
       for (const enemy of enemies) if (!enemy.dead && !enemy.dormant && enemy.kind !== 'wraith' && enemyNearViewport(enemy)) resolveEnemyWalls(enemy);
       for (const roomId of combatRooms) if (!clearedRooms.has(roomId) && !enemies.some((enemy) => !enemy.dead && roomAt(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2) === roomId)) { clearedRooms.add(roomId); if (!damagedRooms.has(roomId)) unlockAchievement('clear_mind'); }
@@ -2589,7 +2705,7 @@ export default function App() {
       }
       if (activeDoor) {
         activeDoor.opening -= dt;
-        if (activeDoor.opening <= 0) { const destination = activeDoor.destination; activeDoor = null; if (location === 'prison') unlockAchievement('escape'); else if (location === 'swamps') unlockAchievement('swamp_guide'); else if (location === 'mines') unlockAchievement('miner'); else if (location === 'clock') unlockAchievement('clockmaker'); runProgress.current.maxHp = player.maxHp; runProgress.current.hp = player.maxHp; runProgress.current.shards = shards; if (destination === 'throne') { setLocation('throne'); setSector(6); } else { writeChronicle(); setPendingDestination(destination); pausedRef.current = true; setShopOpen(true); refreshShop((value) => value + 1); } return; }
+        if (activeDoor.opening <= 0) { const destination = activeDoor.destination; activeDoor = null; if (location === 'prison') unlockAchievement('escape'); else if (location === 'swamps') unlockAchievement('swamp_guide'); else if (location === 'mines') unlockAchievement('miner'); else if (location === 'clock') unlockAchievement('clockmaker'); runProgress.current.maxHp = player.maxHp; runProgress.current.hp = player.maxHp; runProgress.current.shards = shards; writeChronicle(); setPendingDestination(destination); setShopVisit((visit) => visit + 1); setAlchemistRelicOffers(chooseRelics(runProgress.current.relics)); pausedRef.current = true; setShopOpen(true); refreshShop((value) => value + 1); return; }
       }
       uiTimer -= dt;
       if (uiTimer <= 0) { uiTimer = .08; setHud({ hp: player.hp, maxHp: player.maxHp, shards, kills, grenade: Math.max(0, grenadeCd), trap: Math.max(0, trapCd), message: player.dead ? 'ВЫ ПРОИГРАЛИ' : '' }); }
@@ -3126,11 +3242,12 @@ export default function App() {
           drawWalkingLegs(ctx, { phase: now * (4.4 + runAmount * 6.4), moving: runAmount > .04, movement: runAmount, strideScale: 1.18, liftScale: 1.1, legColor: '#34343f', bootColor: '#15151b', legWidth: 8, bootWidth: 9, bootHeight: 9 });
           drawPlayerKnight(ctx, knightPose, cosmetic.maskGlow);
         }
-        if (player.guard > 0) { const perfect = player.guardAge <= .2; ctx.shadowColor = perfect ? '#fff7ae' : '#facc15'; ctx.shadowBlur = perfect ? 16 : 5; ctx.fillStyle = perfect ? '#fff7ae' : '#facc15'; ctx.fillRect(15, -18, 12, 36); ctx.strokeStyle = '#fff1a8'; ctx.lineWidth = 2; ctx.strokeRect(15, -18, 12, 36); ctx.shadowBlur = 0; }
+        if (player.guard > 0) { const shield = runProgress.current.loadout[selectedSlot.current]; const config = equipmentConfig(shield.equipmentId, 'shield'); const perfect = player.guardAge <= (config.kind === 'shield' ? config.perfectBlockWindow : .2); ctx.shadowColor = perfect ? '#fff7ae' : '#facc15'; ctx.shadowBlur = perfect ? 16 : 5; ctx.fillStyle = perfect ? '#fff7ae' : '#facc15'; ctx.fillRect(15, -18, shield.equipmentId === 'tower_shield' ? 16 : 12, 36); ctx.strokeStyle = '#fff1a8'; ctx.lineWidth = 2; ctx.strokeRect(15, -18, shield.equipmentId === 'tower_shield' ? 16 : 12, 36); ctx.shadowBlur = 0; }
       }
       ctx.save();
       if (player.attack > 0 && player.attackFacing !== player.facing) ctx.scale(-1, 1);
-      drawPlayerSword(ctx, player.attack, player.attackMax, player.attackDirection, cosmetic.weapon);
+      if (weaponAnimationState === 'idle' && player.attack <= 0 && player.bow <= 0 && player.guard <= 0) drawPlayerWeaponHold(ctx, runProgress.current.loadout[selectedSlot.current].kind, cosmetic.weapon);
+      drawPlayerSword(ctx, player.attack, player.attackMax, player.attackDirection, cosmetic.weapon, player.attackStage);
       ctx.restore();
       drawPlayerBow(ctx, player.bow, player.bowMax);
       ctx.restore(); ctx.restore();
@@ -3183,9 +3300,9 @@ export default function App() {
     refreshShop((value) => value + 1);
   };
   const merchantWeapons: Array<{ gear: Gear; cost: number }> = [
-    { gear: { kind: 'sword', name: 'Клинок торговца', tier: sector + 1, damage: 27 + sector * 5, cooldown: .31 }, cost: 18 + sector * 2 },
-    { gear: { kind: 'bow', name: 'Точный лук', tier: sector + 1, damage: 21 + sector * 4, cooldown: .48 }, cost: 20 + sector * 2 },
-    { gear: sector % 2 ? { kind: 'grenade', name: 'Тяжёлая бомба', tier: sector, damage: 50 + sector * 6, cooldown: 4.5 } : { kind: 'freeze', name: 'Морозная сфера', tier: sector, damage: 28 + sector * 4, cooldown: 5.5 }, cost: 24 + sector * 2 },
+    { gear: { kind: 'sword', weaponId: 'merchant_blade', name: 'Клинок торговца', tier: sector + 1, damage: 27 + sector * 5, cooldown: .31 }, cost: 18 + sector * 2 },
+    { gear: { kind: 'bow', equipmentId: 'precision_bow', name: 'Точный лук', tier: sector + 1, damage: 21 + sector * 4, cooldown: .48 }, cost: 20 + sector * 2 },
+    { gear: sector % 2 ? { kind: 'grenade', equipmentId: 'heavy_bomb', name: 'Тяжёлая бомба', tier: sector, damage: 50 + sector * 6, cooldown: 4.5 } : { kind: 'freeze', equipmentId: 'frost_orb', name: 'Морозная сфера', tier: sector, damage: 28 + sector * 4, cooldown: 5.5 }, cost: 24 + sector * 2 },
   ];
   const buyWeapon = (offer: { gear: Gear; cost: number }) => {
     const slots = weaponSlots(offer.gear);
@@ -3213,17 +3330,16 @@ export default function App() {
     const next = { embers: legacyProgress.embers - item.cost, unlocks: [...legacyProgress.unlocks, id] };
     setLegacyProgress(next);
   };
-  const offerBossRelic = () => {
-    const choices = chooseRelics(runProgress.current.relics);
-    if (!choices.length) return;
-    relicChoiceOpen.current = true; pausedRef.current = true; setPaused(true); setRelicChoices(choices);
-  };
-  const chooseBossRelic = (relic: Relic) => {
-    if (!runProgress.current.relics.includes(relic.id)) runProgress.current.relics.push(relic.id);
+  const takeAlchemistRelic = (relic: Relic) => {
+    const ownedCount = runProgress.current.relics.length;
+    if (relicClaimedVisit === shopVisit || ownedCount >= 4 || runProgress.current.relics.includes(relic.id)) return;
+    if (ownedCount >= 3 && !spendShards(100)) return;
+    runProgress.current.relics.push(relic.id);
     playUiSound(settingsRef.current.effectsVolume, 'relic');
     const synergy = RELIC_SYNERGIES.find(({ ids }) => ids.every((id) => runProgress.current.relics.includes(id)) && (ids as readonly RelicId[]).includes(relic.id));
-    if (synergy) { setStoryMessage(`СИНЕРГИЯ: ${synergy.name} — ${synergy.description}`); window.setTimeout(() => setStoryMessage(''), 4200); }
-    relicChoiceOpen.current = false; setRelicChoices([]); pausedRef.current = false; setPaused(false);
+    setStoryMessage(synergy ? `СИНЕРГИЯ: ${synergy.name} — ${synergy.description}` : `Получена реликвия «${relic.name}».`);
+    window.setTimeout(() => setStoryMessage(''), synergy ? 4200 : 2400);
+    setRelicClaimedVisit(shopVisit); refreshShop((value) => value + 1);
   };
   const replaceWeaponInSlot = (slot: number) => {
     if (!weaponReplacement || !weaponReplacement.slots.includes(slot)) return;
@@ -3254,6 +3370,12 @@ export default function App() {
     if (activeSaveSlot === slot) setActiveSaveSlot(null);
     if (session) { setCloudSaveStatus('syncing'); void deleteCloudSave(session.user.id, slot).then(() => setCloudSaveStatus('synced')).catch(() => setCloudSaveStatus('error')); }
   };
+
+  const respawnAtLocationStart = () => {
+    runProgress.current.hp = runProgress.current.maxHp;
+    setDeathSummary(null); setDeathScreen('stats'); setDeathAdvice('');
+    pausedRef.current = false; setPaused(false); setRunKey((value) => value + 1);
+  };
   const beginNewInSlot = (slot: number) => {
     permanentProgress.current = emptyPermanentProgress();
     setLegacyProgress(emptyLegacyProgress());
@@ -3262,7 +3384,7 @@ export default function App() {
   const startNewGame = () => {
     bossTrialRef.current = null; setBossTrial(null);
     localStorage.removeItem('ashfall-autosave'); setAutosave(null);
-    setEnding(false); setStoryMessage(''); setRelicChoices([]); relicChoiceOpen.current = false; setDeathSummary(null); setDeathScreen('stats'); setCombatNotice(null);
+    setEnding(false); setStoryMessage(''); setShopVisit(0); setRelicClaimedVisit(null); setDeathSummary(null); setDeathScreen('stats'); setCombatNotice(null);
     runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 }; legacyAwarded.current = false; savedRecordForRun.current = false; runElapsed.current = 0; timedGhostFrames.current = []; setElapsedHud(0); setDeathAdvice(''); setChronicle('');
     runProgress.current = freshRun(permanentProgress.current); selectedSlot.current = 0; setActiveSlot(0); setLocation('prison'); setSector(1);
     setMapArchive({}); mapOpenRef.current = false; setMapOpen(false);
@@ -3281,7 +3403,7 @@ export default function App() {
     const rewardTier = trialRewardTier(bossTrialProgress.seals);
     if (rewardTier >= 1) progress.damage += .1;
     if (rewardTier >= 2) { progress.maxHp += 1; progress.hp += 1; }
-    progress.loadout = [{ ...BASIC_WEAPONS[0], damage: 34, tier: 4 }, { ...BASIC_WEAPONS[2], damage: 25, tier: 4 }, { kind: 'grenade', name: 'Осколочная бомба', tier: 3, damage: 55, cooldown: 5 }, { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 }];
+    progress.loadout = [{ ...BASIC_WEAPONS[0], damage: 34, tier: 4 }, { ...BASIC_WEAPONS[2], damage: 25, tier: 4 }, { kind: 'grenade', equipmentId: 'fragmentation_bomb', name: 'Осколочная бомба', tier: 3, damage: 55, cooldown: 5 }, { kind: 'empty', name: 'Пусто', tier: 0, damage: 0, cooldown: 0 }];
     runProgress.current = progress; runStats.current = { startedAt: Date.now(), kills: 0, damageTaken: 0, bossesDefeated: 0 };
     bossTrialRef.current = trial; setBossTrial(trial); setTrialRewardMessage(''); setDeathSummary(null); setDeathScreen('stats'); runElapsed.current = 0; setElapsedHud(0); setLocation(trial.location); setSector(trial.location === 'throne' ? 6 : trial.location === 'crypt' || trial.location === 'bridge' ? 4 : 2);
     setHud({ hp: progress.hp, maxHp: progress.maxHp, shards: 0, kills: 0, grenade: 0, trap: 0, message: '' });
@@ -3410,7 +3532,13 @@ export default function App() {
       </div>}
       {settingsOpen && <div className="fixed inset-0 z-[80] grid place-items-center bg-black/80 px-4 backdrop-blur-md"><section className="w-full max-w-2xl border border-cyan-300/25 bg-[#081116] p-6 shadow-[0_0_70px_rgba(34,211,238,.1)] md:p-8"><div className="flex items-start justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.35em] text-cyan-300">False Knight</p><h2 className="mt-2 text-3xl font-black uppercase">Настройки</h2></div><button onClick={() => setSettingsOpen(false)} className="border border-white/15 px-3 py-2 text-xs text-slate-400 hover:border-cyan-300/50">✕</button></div><div className="mt-7 grid gap-5"><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость музыки <b className="text-cyan-200">{settings.musicVolume}%</b></span><input type="range" min="0" max="100" value={settings.musicVolume} onChange={(event) => setSettings((current) => ({ ...current, musicVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><label className="grid gap-2 text-xs font-bold uppercase tracking-[.14em] text-slate-300"><span className="flex justify-between">Громкость эффектов <b className="text-cyan-200">{settings.effectsVolume}%</b></span><input type="range" min="0" max="100" value={settings.effectsVolume} onChange={(event) => setSettings((current) => ({ ...current, effectsVolume: Number(event.target.value) }))} className="accent-cyan-300"/></label><button onClick={() => setSettings((current) => ({ ...current, screenShake: !current.screenShake }))} className={`flex justify-between border px-4 py-3 text-xs font-black uppercase tracking-[.14em] ${settings.screenShake ? 'border-emerald-300/50 bg-emerald-300/10 text-emerald-200' : 'border-white/15 text-slate-500'}`}><span>Тряска экрана</span><span>{settings.screenShake ? 'Вкл' : 'Выкл'}</span></button></div><div className="mt-7 border-t border-white/10 pt-5"><p className="text-[9px] font-black uppercase tracking-[.25em] text-slate-500">Управление</p><div className="mt-4 grid grid-cols-2 gap-2 text-[10px] text-slate-400 md:grid-cols-3">{[['WASD / стрелки','Движение'],['ЛКМ / J','Атака'],['S + ЛКМ в воздухе','Удар вниз'],['F','Лечение Душой'],['E','Действие'],['Shift / C','Перекат']].map(([key, action]) => <div key={key} className="border border-white/10 bg-black/25 p-3"><kbd className="font-black text-slate-100">{key}</kbd><span className="mt-1 block">{action}</span></div>)}</div></div></section></div>}
       {ending && <div className="ending-overlay fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5 overflow-y-auto bg-black px-6 py-10 text-center"><div className="ending-lore grid gap-3"><p className="ending-line text-lg text-slate-300 md:text-2xl">...Я искал Короля-Тирана, чтобы спасти это королевство.</p><p className="ending-line text-lg text-slate-300 md:text-2xl" style={{ animationDelay: '3.5s' }}>Но Король-Тиран — это я. Рыцарь всё это время бежал от собственного отражения.</p><p className="ending-line text-2xl font-black text-amber-200 md:text-4xl" style={{ animationDelay: '7s' }}>Круг замкнулся.</p><p className="ending-line text-sm uppercase tracking-[.3em] text-slate-500" style={{ animationDelay: '10.5s' }}>Спасибо за игру в False Knight!</p></div><section className="ending-summary w-full max-w-lg border-y border-amber-300/25 bg-[#050608] px-7 py-7 shadow-[0_0_70px_rgba(251,146,60,.09)]"><h2 className="text-3xl font-black uppercase tracking-[.16em] text-amber-50 md:text-4xl">Конец забега</h2><div className="mx-auto mt-5 max-w-sm border-y border-white/10 py-4 text-xs text-slate-400"><p className="flex justify-between"><span>Осколков собрано:</span><b className="text-amber-200">{runProgress.current.shards} 💎</b></p></div><div className="mt-5 border border-amber-300/15 bg-amber-300/5 p-4 text-sm leading-6 text-slate-300"><p className="mb-2 text-[8px] font-black uppercase tracking-[.3em] text-amber-300">Летопись забега</p>{chronicleLoading ? 'Хронист записывает последние строки…' : chronicle}</div><button onClick={finishRunToMainMenu} className="ending-menu-button mt-6 border border-cyan-300/45 bg-cyan-300/10 px-7 py-4 text-xs font-black uppercase tracking-[.16em] text-cyan-50">Вернуться в главное меню</button></section></div>}
-      {shopOpen && <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[#07100f]/95 px-4 py-8 backdrop-blur-md">
+      {shopOpen && <MerchantHub origin={location === 'throne' ? 'castle' : location} shards={runProgress.current.shards} interactKey={settings.bindings.interact} onLeave={leaveShop}
+        forge={<div className="grid gap-3 md:grid-cols-2"><button onClick={() => buyPermanent('health')} className="border border-amber-300/25 bg-amber-300/5 p-4 text-left hover:border-amber-300"><b className="block text-sm">Укрепить здоровье +1 маска</b><small className="text-slate-500">Постоянное улучшение этого слота</small><strong className="mt-3 block text-amber-200">{45 + permanentProgress.current.maxHpBonus * 20} ◆</strong></button><button onClick={() => buyPermanent('damage')} className="border border-amber-300/25 bg-amber-300/5 p-4 text-left hover:border-amber-300"><b className="block text-sm">Закалить оружие +8% урона</b><small className="text-slate-500">Постоянное улучшение этого слота</small><strong className="mt-3 block text-amber-200">{30 + Math.round(permanentProgress.current.damageBonus / .08) * 8} ◆</strong></button></div>}
+        alchemist={<div><p className="mb-4 text-xs text-slate-400">Можно взять одну реликвию за посещение. Первые три бесплатны, четвёртая стоит 100 осколков.</p>{relicClaimedVisit === shopVisit ? <p className="border border-emerald-300/30 bg-emerald-300/5 p-5 text-sm text-emerald-200">В этом убежище реликвия уже получена.</p> : runProgress.current.relics.length >= 4 ? <p className="border border-white/10 p-5 text-sm text-slate-500">Достигнут предел: 4 реликвии.</p> : <div className="grid gap-3 md:grid-cols-3">{alchemistRelicOffers.map((relic) => <button key={relic.id} onClick={() => takeAlchemistRelic(relic)} className="border border-violet-300/25 bg-violet-300/5 p-4 text-left hover:border-violet-300"><span className="text-3xl">{relic.icon}</span><b className="mt-3 block text-sm text-violet-100">{relic.name}</b><small className="mt-2 block leading-5 text-slate-500">{relic.description}</small><strong className="mt-3 block text-amber-200">{runProgress.current.relics.length < 3 ? 'Бесплатно' : '100 ◆'}</strong></button>)}</div>}</div>}
+        weapons={<div className="grid gap-3 md:grid-cols-3">{merchantWeapons.map((offer) => <button key={`${offer.gear.kind}-${offer.gear.name}`} onClick={() => buyWeapon(offer)} className="border border-rose-300/25 bg-rose-300/5 p-4 text-left hover:border-rose-300"><span className="text-3xl">{gearIcons[offer.gear.kind]}</span><b className="mt-2 block text-sm">{offer.gear.name}</b><small className="text-slate-500">T{offer.gear.tier} · урон {offer.gear.damage}</small><strong className="mt-3 block text-rose-200">{offer.cost} ◆</strong></button>)}</div>}
+        evolution={<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{runProgress.current.loadout.map((gear, slot) => gear.kind !== 'empty' && weaponBranches(gear.kind).length > 0 ? <article key={`${slot}-${gear.name}`} className="border border-cyan-300/20 bg-cyan-300/5 p-3"><b className="text-xs">{gearIcons[gear.kind]} {gear.name}</b>{gear.branch ? <p className="mt-3 text-[10px] text-emerald-300">Эволюция уже завершена</p> : <div className="mt-3 grid gap-2">{weaponBranches(gear.kind).map((branch) => <button key={branch.id} onClick={() => evolveEquippedWeapon(slot, branch.id)} className="border border-cyan-300/20 p-2 text-left text-[10px] hover:border-cyan-300"><strong className="block text-cyan-100">{branch.name}</strong><span className="text-slate-500">{branch.description}</span><b className="mt-1 block text-amber-200">{24 + gear.tier * 6} ◆</b></button>)}</div>}</article> : null)}</div>}
+      />}
+      {false && shopOpen && <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-[#07100f]/95 px-4 py-8 backdrop-blur-md">
         <div className="w-full max-w-6xl">
           <div className="mb-6 text-center"><p className="text-[10px] font-black uppercase tracking-[.45em] text-teal-300">Безопасная комната</p><h2 className="mt-2 text-3xl font-black uppercase md:text-5xl">Убежище торговцев</h2><p className="mt-3 text-sm text-slate-500">Осколки: <span className="font-black text-amber-200">{runProgress.current.shards}</span></p>{(chronicleLoading || chronicle) && <p className="mx-auto mt-4 max-w-2xl border-y border-amber-300/15 py-3 text-xs leading-5 text-amber-50/70">{chronicleLoading ? 'Хронист записывает пройденный путь…' : chronicle}</p>}</div>
           <p className="mb-3 text-center text-[9px] font-bold uppercase tracking-[.18em] text-amber-300/70">Все цены указаны в Осколках</p>
@@ -3475,14 +3603,15 @@ export default function App() {
           {storyMessage && <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex justify-center px-6"><p className="max-w-2xl border-y border-amber-300/25 bg-black/85 px-7 py-4 text-center text-sm font-semibold leading-6 text-amber-50 shadow-[0_0_35px_rgba(0,0,0,.65)] md:text-lg">{storyMessage}</p></div>}
           {combatNotice && <div key={combatNotice.id} className="combat-notice pointer-events-none absolute inset-x-0 top-[22%] z-30 flex justify-center px-5"><p className={`border px-5 py-2 text-center text-xs font-black uppercase tracking-[.16em] shadow-2xl md:text-sm ${combatNotice.tone === 'danger' ? 'border-rose-300/60 bg-rose-950/90 text-rose-100' : combatNotice.tone === 'parry' ? 'border-amber-200/70 bg-amber-950/90 text-amber-100' : 'border-cyan-300/50 bg-slate-950/90 text-cyan-100'}`}>{combatNotice.text}</p></div>}
           {dailyRewardMessage && <div className="pointer-events-none absolute inset-x-0 top-24 z-30 flex justify-center px-6"><p className="max-w-xl border border-emerald-300/40 bg-[#07150f]/95 px-6 py-4 text-center text-sm font-black text-emerald-200 shadow-2xl">{dailyRewardMessage}</p></div>}
-          {started && relicChoices.length > 0 && <RelicChoice choices={relicChoices} onChoose={chooseBossRelic}/>}
           {started && hud.message && hud.hp === 0 && deathSummary && <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center overflow-y-auto bg-[#05070d]/90 px-4 py-6 backdrop-blur-[3px]">
             {deathScreen === 'stats' ? <section className="death-stats-card pointer-events-auto w-full max-w-2xl border-y border-cyan-300/35 bg-black/85 px-6 py-7 text-center shadow-[0_0_80px_rgba(34,211,238,.12)] md:px-10">
               <p className="text-[9px] font-black uppercase tracking-[.42em] text-cyan-300">Итоги забега</p><h2 className="mt-3 text-3xl font-black uppercase tracking-tight md:text-5xl">Статистика похода</h2>
               <div className="mt-6 grid grid-cols-2 gap-2 text-left md:grid-cols-3">{[
                 ['Время', `${String(Math.floor(deathSummary.seconds / 60)).padStart(2, '0')}:${String(deathSummary.seconds % 60).padStart(2, '0')}`], ['Локация', LOCATION_NAMES_RU[deathSummary.location]], ['Сектор', String(deathSummary.sector)], ['Врагов побеждено', String(deathSummary.kills)], ['Боссов побеждено', String(deathSummary.bossesDefeated)], ['Получено урона', `${deathSummary.damageTaken} масок`], ['Осколков собрано', String(deathSummary.shards)], ['Причина смерти', deathSummary.deathCause || 'неизвестно'], ['Реликвий', String(deathSummary.relics.length)],
               ].map(([label, value]) => <div key={label} className="border border-white/10 bg-white/[.03] p-3"><small className="block text-[8px] font-bold uppercase tracking-[.15em] text-slate-500">{label}</small><b className="mt-1 block text-sm text-slate-100">{value}</b></div>)}</div>
-              <button onClick={() => setDeathScreen('interrupted')} className="mt-6 border border-cyan-300/55 bg-cyan-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-cyan-50 hover:bg-cyan-300/20">Продолжить</button>
+              {runMode === 'checkpoint'
+                ? <button onClick={respawnAtLocationStart} className="mt-6 border border-emerald-300/55 bg-emerald-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-emerald-50 hover:bg-emerald-300/20">Возродиться в начале локации</button>
+                : <button onClick={() => setDeathScreen('interrupted')} className="mt-6 border border-cyan-300/55 bg-cyan-300/10 px-7 py-3 text-xs font-black uppercase tracking-[.2em] text-cyan-50 hover:bg-cyan-300/20">Продолжить</button>}
             </section> : <section className="pointer-events-auto max-w-2xl border-y border-rose-400/40 bg-black/80 px-7 py-7 text-center shadow-[0_0_70px_rgba(244,63,94,.18)] md:px-12"><p className="text-[10px] font-bold uppercase tracking-[.4em] text-rose-400">Красная искра погасла</p><p className="mt-4 text-lg font-semibold leading-8 text-slate-200 md:text-2xl">«{deathQuote}»</p><p className="mt-3 text-2xl font-black uppercase tracking-[.12em] md:text-4xl">Твой поход прерван</p><div className="mt-4 border border-cyan-300/15 bg-cyan-300/5 px-4 py-3 text-xs leading-5 text-cyan-50"><b className="mb-1 block text-[8px] uppercase tracking-[.24em] text-cyan-300">Совет хранителя</b>{deathAdviceLoading ? 'Хранитель изучает твой бой…' : deathAdvice}</div><p className="mt-3 text-xs uppercase tracking-[.25em] text-slate-500">Постоянные улучшения сохранены</p><button onClick={() => { pausedRef.current = false; setPaused(false); setMenuTab('play'); setStarted(false); setChoosingLoadout(true); }} className="mt-6 border border-teal-300/50 bg-teal-300/10 px-6 py-3 text-xs font-bold uppercase tracking-[.2em] text-teal-100 hover:bg-teal-300/20">Выбрать оружие и начать заново</button></section>}
           </div>}
           {hud.message === 'ДВЕРИ ОТКРЫТЫ' && <div className="pointer-events-none absolute inset-x-0 top-24 flex justify-center"><div className="border border-teal-300/30 bg-[#071015]/85 px-6 py-3 text-center shadow-[0_0_35px_rgba(45,212,191,.16)]"><p className="text-sm font-black tracking-[.22em] text-teal-100 md:text-lg">ДВЕРИ ОТКРЫТЫ</p><p className="mt-1 text-[8px] uppercase tracking-[.25em] text-teal-300/60"><span className="desktop-interaction-hint">Найдите дверь и нажмите E</span><span className="mobile-interaction-hint">Подойдите и нажмите на дверь</span></p></div></div>}

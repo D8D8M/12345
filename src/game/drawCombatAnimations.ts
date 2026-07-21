@@ -9,6 +9,7 @@ export const drawPlayerSword = (
   duration: number,
   direction: number,
   bladeColor = '#cbd5e1',
+  comboStage = 0,
 ) => {
   if (remaining <= 0) return;
   const progress = clamp01(1 - remaining / Math.max(.01, duration));
@@ -37,7 +38,8 @@ export const drawPlayerSword = (
     return;
   }
   const swing = ease(clamp01(progress / .72));
-  const angle = -1.65 + swing * 2.75;
+  const reverse = comboStage === 1;
+  const angle = reverse ? 1.2 - swing * 2.65 : -1.65 + swing * (comboStage === 2 ? 3.25 : 2.75);
   ctx.save();
   ctx.translate(10, 0);
   ctx.rotate(angle);
@@ -52,12 +54,22 @@ export const drawPlayerSword = (
     const glow = Math.sin((progress - .22) / .6 * Math.PI);
     ctx.save(); ctx.globalAlpha = glow * .16; ctx.strokeStyle = '#94a3b8'; ctx.lineCap = 'round';
     ctx.shadowColor = '#e2e8f0'; ctx.shadowBlur = 4; ctx.lineWidth = 10;
-    ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(7, 0, comboStage === 2 ? 60 : 49, reverse ? -1.15 : -1.4, reverse ? 1.4 : 1.2); ctx.stroke();
     ctx.globalAlpha = glow * .4; ctx.strokeStyle = '#cbd5e1'; ctx.shadowBlur = 2; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke();
     ctx.globalAlpha = glow * .9; ctx.strokeStyle = '#ffffff'; ctx.shadowBlur = 0; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(7, 0, 49, -1.4, 1.2); ctx.stroke(); ctx.restore();
   }
+};
+
+export const drawPlayerWeaponHold = (ctx: CanvasRenderingContext2D, kind: string, bladeColor = '#cbd5e1') => {
+  ctx.save(); ctx.translate(13, 0); ctx.lineCap = 'round';
+  if (kind === 'sword') { ctx.rotate(.42); ctx.strokeStyle = '#6f5428'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(12, 0); ctx.stroke(); ctx.strokeStyle = bladeColor; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(43, 0); ctx.stroke(); }
+  else if (kind === 'bow') { ctx.strokeStyle = '#d8a75d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(5, 0, 20, -1.2, 1.2); ctx.stroke(); }
+  else if (kind === 'shield') { ctx.fillStyle = '#d4a72c'; ctx.fillRect(2, -17, 11, 34); ctx.strokeStyle = '#fff1a8'; ctx.strokeRect(2, -17, 11, 34); }
+  else if (kind === 'grenade' || kind === 'freeze') { ctx.fillStyle = kind === 'freeze' ? '#67e8f9' : '#f59e0b'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8; ctx.beginPath(); ctx.arc(4, 5, 7, 0, Math.PI * 2); ctx.fill(); }
+  else if (kind === 'trap') { ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-3, 8); ctx.lineTo(5, 1); ctx.lineTo(13, 8); ctx.stroke(); }
+  ctx.restore();
 };
 
 export const drawPlayerBow = (ctx: CanvasRenderingContext2D, remaining: number, duration: number) => {
