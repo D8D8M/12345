@@ -1110,12 +1110,6 @@ export default function App() {
       h: 72,
       side: entranceSide,
     };
-    const locationNpc = mineLayout ? {
-      name: 'Бродячий Кузнец',
-      x: spawnX + (spawnEdge === 'left' ? 150 : -150),
-      y: spawnY + 4,
-      color: '#9a6a3a',
-    } : null;
     const spawnSafeRadius = 240;
     const bossOnlyRoomIds = new Set<number>([...(stageTwoBossFight ? exitRooms.map((room) => room.id) : []), ...(stageFourBossFight ? [arenaRoom.id] : [])]);
     const spawnPlatforms = [...terrain, ...oneWays].filter((platform) => {
@@ -1339,7 +1333,6 @@ export default function App() {
     const fixedInteractive: Box[] = [
       ...doorReserved,
       ...castleMirrors,
-      ...(locationNpc ? [{ x: locationNpc.x - 12, y: locationNpc.y - 12, w: 58, h: 72 }] : []),
     ];
     for (let index = teleportPortals.length - 1; index >= 0; index--) {
       const portal = teleportPortals[index], portalBox = { x: portal.x - 31, y: portal.y - 72, w: 62, h: 80 };
@@ -3056,13 +3049,6 @@ export default function App() {
         ctx.fillRect(entranceDoor.x + 8, entranceDoor.y + 34, entranceDoor.w - 16, 5);
         ctx.fillStyle = theme.flameCore;
         ctx.fillRect(entranceDoor.x + (entranceDoor.side === 'left' ? entranceDoor.w - 11 : 7), entranceDoor.y + 35, 4, 4);
-      }
-      if (locationNpc) {
-        ctx.fillStyle = locationNpc.color; ctx.fillRect(locationNpc.x, locationNpc.y + 8, 34, 48);
-        ctx.fillStyle = '#cbd5e1'; ctx.fillRect(locationNpc.x + 4, locationNpc.y, 26, 17);
-        ctx.fillStyle = '#081018'; ctx.fillRect(locationNpc.x + 9, locationNpc.y + 7, 4, 3); ctx.fillRect(locationNpc.x + 21, locationNpc.y + 7, 4, 3);
-        ctx.fillStyle = theme.accent; ctx.font = 'bold 10px ui-sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText(locationNpc.name, locationNpc.x + 17, locationNpc.y - 10); ctx.textAlign = 'start';
       }
       for (const door of doors) {
         const locked = enemies.some((enemy) => (enemy.kind === 'boss' || enemy.kind === 'rightHand') && !enemy.dead && !enemy.dormant);
