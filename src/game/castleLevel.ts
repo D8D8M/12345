@@ -42,15 +42,19 @@ export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: num
         scale: 1,
       });
     }
-    const bannerPositions = [.06, .16, .26, .36, .64, .74, .84, .94];
-    for (const [row, height] of [.43, .66].entries()) {
-      for (const [index, position] of bannerPositions.entries()) banners.push({
-        x: room.x + roomW * position - 21,
-        y: room.y + roomH * height,
-        color: (room.id + index + row) % 2 ? 'red' : 'blue',
-        crest: (index + row) % 2 ? 'lion' : 'crown',
-        scale: .62,
-      });
+    const bannerPositions = Array.from({ length: 13 }, (_, index) => .04 + index * .076);
+    for (const [row, height] of [.12, .3, .49, .68, .84].entries()) {
+      for (const [index, position] of bannerPositions.entries()) {
+        const overlapsWindow = height < .49 && position > .34 && position < .66;
+        if (overlapsWindow) continue;
+        banners.push({
+          x: room.x + roomW * position - 17,
+          y: room.y + roomH * height,
+          color: (room.id + index + row) % 2 ? 'red' : 'blue',
+          crest: (index + row) % 2 ? 'lion' : 'crown',
+          scale: .5,
+        });
+      }
     }
     if (room.connections.has(room.id - columns)) staircases.push({ x: room.x + roomW / 2, y: room.y + 48, h: roomH - 96 });
   }
