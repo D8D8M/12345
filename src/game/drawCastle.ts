@@ -10,6 +10,16 @@ const drawFlame = (ctx: CanvasRenderingContext2D, x: number, y: number, phase: n
   ctx.fillStyle = '#fff0a3'; ctx.beginPath(); ctx.ellipse(x, y + 5, 4, 9, 0, 0, Math.PI * 2); ctx.fill();
 };
 
+const traceArch = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) => {
+  const curveY = y + h * .42;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, curveY);
+  ctx.arc(x + w / 2, curveY, w / 2, Math.PI, 0);
+  ctx.lineTo(x + w, y + h);
+  ctx.closePath();
+};
+
 export const drawCastleBackdrop = (ctx: CanvasRenderingContext2D, level: CastleLevel, time: number) => {
   for (const wall of level.walls) {
     ctx.fillStyle = '#4b382d';
@@ -27,19 +37,34 @@ export const drawCastleBackdrop = (ctx: CanvasRenderingContext2D, level: CastleL
     ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
   }
   for (const arch of level.arches) {
-    ctx.fillStyle = '#15182a'; ctx.fillRect(arch.x, arch.y + arch.h * .42, arch.w, arch.h * .58);
-    ctx.beginPath(); ctx.arc(arch.x + arch.w / 2, arch.y + arch.h * .42, arch.w / 2, Math.PI, 0); ctx.fill();
-    ctx.strokeStyle = '#b88a36'; ctx.lineWidth = 9; ctx.stroke();
-    ctx.strokeStyle = '#f0ca68'; ctx.lineWidth = 2; ctx.stroke();
+    traceArch(ctx, arch.x, arch.y, arch.w, arch.h);
+    const night = ctx.createLinearGradient(0, arch.y, 0, arch.y + arch.h);
+    night.addColorStop(0, '#090d20'); night.addColorStop(1, '#171a36');
+    ctx.fillStyle = night; ctx.fill();
+    ctx.save(); traceArch(ctx, arch.x, arch.y, arch.w, arch.h); ctx.clip();
+    for (let star = 0; star < 38; star++) {
+      const x = arch.x + 16 + ((star * 97 + arch.x * .13) % (arch.w - 32));
+      const y = arch.y + 16 + ((star * 53 + arch.y * .17) % (arch.h - 32));
+      const radius = .8 + (star % 4) * .38;
+      ctx.globalAlpha = .42 + Math.sin(time * (1.2 + star % 3 * .25) + star) * .25;
+      ctx.fillStyle = star % 6 === 0 ? '#ffe7a0' : '#dbeafe';
+      ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    traceArch(ctx, arch.x, arch.y, arch.w, arch.h);
+    ctx.strokeStyle = '#8f6829'; ctx.lineWidth = 14; ctx.stroke();
+    traceArch(ctx, arch.x, arch.y, arch.w, arch.h);
+    ctx.strokeStyle = '#f0ca68'; ctx.lineWidth = 4; ctx.stroke();
   }
   for (const banner of level.banners) {
+    ctx.save(); ctx.translate(banner.x, banner.y); ctx.scale(banner.scale, banner.scale);
     const color = banner.color === 'red' ? '#801f32' : '#173f7a';
-    ctx.fillStyle = '#d6ad4b'; ctx.fillRect(banner.x - 7, banner.y - 8, 82, 7);
-    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(banner.x, banner.y); ctx.lineTo(banner.x + 68, banner.y);
-    ctx.lineTo(banner.x + 68, banner.y + 116); ctx.lineTo(banner.x + 34, banner.y + 94); ctx.lineTo(banner.x, banner.y + 116); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d6ad4b'; ctx.fillRect(-7, -8, 82, 7);
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(68, 0);
+    ctx.lineTo(68, 116); ctx.lineTo(34, 94); ctx.lineTo(0, 116); ctx.closePath(); ctx.fill();
     ctx.strokeStyle = '#e4bd55'; ctx.lineWidth = 3; ctx.stroke();
     ctx.fillStyle = '#f3d77d'; ctx.font = 'bold 28px serif'; ctx.textAlign = 'center';
-    ctx.fillText(banner.crest === 'crown' ? '♛' : '♜', banner.x + 34, banner.y + 58);
+    ctx.fillText(banner.crest === 'crown' ? '♛' : '♜', 34, 58); ctx.restore();
   }
   for (const carpet of level.carpets) {
     ctx.fillStyle = '#551226'; ctx.fillRect(carpet.x, carpet.y, carpet.w, carpet.h);
