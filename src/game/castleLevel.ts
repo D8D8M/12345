@@ -42,13 +42,16 @@ export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: num
         scale: 1,
       });
     }
-    for (const [index, position] of [.1, .3, .7, .9].entries()) banners.push({
-      x: room.x + roomW * position - 24,
-      y: room.y + roomH * .46,
-      color: (room.id + index) % 2 ? 'red' : 'blue',
-      crest: index % 2 ? 'lion' : 'crown',
-      scale: .72,
-    });
+    const bannerPositions = [.06, .16, .26, .36, .64, .74, .84, .94];
+    for (const [row, height] of [.43, .66].entries()) {
+      for (const [index, position] of bannerPositions.entries()) banners.push({
+        x: room.x + roomW * position - 21,
+        y: room.y + roomH * height,
+        color: (room.id + index + row) % 2 ? 'red' : 'blue',
+        crest: (index + row) % 2 ? 'lion' : 'crown',
+        scale: .62,
+      });
+    }
     if (room.connections.has(room.id - columns)) staircases.push({ x: room.x + roomW / 2, y: room.y + 48, h: roomH - 96 });
   }
   return { torches, banners, arches, carpets, staircases, walls };
