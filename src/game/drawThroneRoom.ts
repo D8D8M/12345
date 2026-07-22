@@ -90,7 +90,6 @@ export const drawThroneRoom = (ctx: CanvasRenderingContext2D, room: ThroneRoomBo
 
   ctx.fillStyle = '#121015'; ctx.fillRect(left + 8, floor - 158, 70, 158); ctx.strokeStyle = '#5b4633'; ctx.lineWidth = 6; ctx.strokeRect(left + 14, floor - 151, 58, 151);
   ctx.fillStyle = '#3a2418'; for (let x = left + 20; x < left + 70; x += 13) ctx.fillRect(x, floor - 146, 8, 142);
-  ctx.fillStyle = '#77717a'; ctx.fillRect(left + 15, floor - 112, 56, 9); ctx.fillRect(left + 40, floor - 150, 8, 150);
 };
 
 export const drawStoneThrone = (ctx: CanvasRenderingContext2D, throne: { x: number; y: number; w: number; h: number }) => {
