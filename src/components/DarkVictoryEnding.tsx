@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 type Props = { assistantLine: string; onMainMenu: () => void };
-const CREDITS = ['FALSE KNIGHT', 'История, мир и разработка', 'Создано в nFactorial Teens', 'Спасибо за игру'];
+const CREDITS = ['FALLEN KNIGHT', 'История, мир и разработка', 'Создано в nFactorial Teens', 'Спасибо за игру'];
 
 export function DarkVictoryEnding({ assistantLine, onMainMenu }: Props) {
   const [scene, setScene] = useState<'death' | 'memory' | 'farewell' | 'throne' | 'victory' | 'credits'>('death');

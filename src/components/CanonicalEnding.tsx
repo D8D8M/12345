@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 type Props = { onMainMenu: () => void };
 type Scene = 'aftermath' | 'realization' | 'ascent' | 'throne' | 'ending' | 'credits';
 
-const CREDITS = ['FALSE KNIGHT', 'Каноничная концовка', 'История, мир и разработка', 'Создано в nFactorial Teens', 'Спасибо за игру'];
+const CREDITS = ['FALLEN KNIGHT', 'Каноничная концовка', 'История, мир и разработка', 'Создано в nFactorial Teens', 'Спасибо за игру'];
 
 export function CanonicalEnding({ onMainMenu }: Props) {
   const [scene, setScene] = useState<Scene>('aftermath');

@@ -35,7 +35,7 @@ export const generateDailyChallenge = async (): Promise<DailyChallenge> => {
   const challenge = fallbackChallenge();
   try {
     const { data, error } = await supabase.functions.invoke('ai', { body: {
-      system: 'Ты создаёшь задания для игры «Восхождение к престолу». Верни только JSON без markdown: {"title":"...","description":"..."}. Русский язык, мрачный стиль, коротко.',
+      system: 'Ты создаёшь задания для игры «Fallen Knight». Верни только JSON без markdown: {"title":"...","description":"..."}. Русский язык, мрачный стиль, коротко.',
       prompt: `Укрась название и описание задания, не меняя условие: ${challenge.description}`,
     } });
     if (error) throw error;
