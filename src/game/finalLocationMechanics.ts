@@ -105,12 +105,5 @@ export const drawFinalStoneWall = (ctx: CanvasRenderingContext2D, wall: FinalBox
     ctx.beginPath(); ctx.moveTo(wall.x + offset, y); ctx.lineTo(wall.x + offset, Math.min(y + courseH, wall.y + wall.h)); ctx.stroke();
   }
 
-  ctx.strokeStyle = '#a39b92'; ctx.lineWidth = 2; ctx.globalAlpha = .48;
-  ctx.beginPath();
-  ctx.moveTo(wall.x + wall.w * .55, wall.y + 90);
-  ctx.lineTo(wall.x + wall.w * .35, wall.y + wall.h * .36);
-  ctx.lineTo(wall.x + wall.w * .65, wall.y + wall.h * .55);
-  ctx.lineTo(wall.x + wall.w * .38, wall.y + wall.h - 80);
-  ctx.stroke();
   ctx.restore();
 };
