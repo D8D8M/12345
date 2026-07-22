@@ -2224,14 +2224,15 @@ export default function App() {
           if (throneIntroTimer > 3.8 && throneIntroBeat === 1) { throneIntroBeat = 2; setStoryMessage('Из тени вылетает клинок...'); }
           if (throneIntroTimer > 5.8 && throneIntroBeat === 2) { throneIntroBeat = 3; servantAlive = false; shake = 18; flash = .24; setStoryMessage('Теневой клинок пронзает Слугу у самого трона!'); burst(servantX, startRoom.y + roomH - wall - 35, '#7f1d1d', 34); }
           if (throneIntroTimer > 7.4 && throneIntroBeat === 3) {
-            throneIntroBeat = 4; setStoryMessage(''); strangerAiBusy.current = true; setStrangerAiLoading(true);
+            throneIntroBeat = 4; setStoryMessage(''); setStrangerAiLine(strangerBetrayalLines[0]);
+            strangerAiBusy.current = true; setStrangerAiLoading(false);
             void requestStrangerBetrayalLines(summarizeRun()).then((lines) => {
               if (throneIntroBeat !== 4 || !throneBoss.dormant) return;
               strangerBetrayalLines = lines; setStrangerAiLine(lines[0]); lastStrangerLine.current = lines[0];
             }).finally(() => { strangerAiBusy.current = false; setStrangerAiLoading(false); });
           }
-          if (throneIntroTimer > 12 && throneIntroBeat === 4) { throneIntroBeat = 5; setStrangerAiLine(strangerBetrayalLines[1]); }
-          if (throneIntroTimer > 17) {
+          if (throneIntroTimer > 15 && throneIntroBeat === 4) { throneIntroBeat = 5; setStrangerAiLine(strangerBetrayalLines[1]); }
+          if (throneIntroTimer > 24) {
             if (throneArenaGate) {
               if (!solids.includes(throneArenaGate)) solids.push(throneArenaGate);
               if (!projectileBlockers.includes(throneArenaGate)) projectileBlockers.push(throneArenaGate);
@@ -3306,7 +3307,7 @@ export default function App() {
         const nearby = Math.abs(player.x + player.w / 2 - portal.x) < 76 && Math.abs(player.y + player.h - portal.y) < 72;
         drawTeleportPortal(ctx, portal, now, nearby, activePortalCount);
       }
-      if (entranceDoor) {
+      if (entranceDoor && !throneScene) {
         ctx.fillStyle = 'rgba(3,7,12,.9)';
         ctx.fillRect(entranceDoor.x - 7, entranceDoor.y - 9, entranceDoor.w + 14, entranceDoor.h + 9);
         ctx.strokeStyle = theme.accent; ctx.lineWidth = 3;

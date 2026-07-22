@@ -41,12 +41,12 @@ export const requestBossLine = (boss: string, run: RunSummary) => askGameAi(
 );
 
 export const STRANGER_BETRAYAL_LINES: [string, string] = [
-  '',
+  'Вот мы и встретились у самого престола. Ты всё это время шёл за короной, даже не понимая, почему она зовёт тебя.',
   'Я собирался просто заколоть тебя и забрать трон... Но какая ирония! Тот, кого я использовал как пешку — это и есть тот самый Король-Тиран, сломавший мою жизнь!',
 ];
 
 export const requestStrangerBetrayalLines = (run: RunSummary) => Promise.all([
-  Promise.resolve(''),
+  Promise.resolve(STRANGER_BETRAYAL_LINES[0]),
   askGameAi(`Продолжи раскрытие Незнакомца перед финальным боем. Сохрани все факты: он хотел заколоть героя и забрать трон, но герой оказался Королём-Тираном, сломавшим его жизнь. Исходная реплика: «${STRANGER_BETRAYAL_LINES[1]}». Данные пути: ${facts(run)}`, STRANGER_BETRAYAL_LINES[1]),
 ]);
 
