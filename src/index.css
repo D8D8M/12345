@@ -71,6 +71,47 @@ section.aspect-video > div.absolute.inset-0.z-20 > div.grid > div.max-w-2xl > p:
 @keyframes ending-panel-reveal { from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)} }
 @keyframes ending-lore-finish { 0%,94%{opacity:1;visibility:visible}100%{opacity:0;visibility:hidden} }
 
+/* The one-life route ends as a staged tragedy in the abandoned throne hall. */
+.dark-ending { background:radial-gradient(circle at 50% 34%,#26151a 0,#09070a 46%,#000 78%); animation:dark-fade-in .8s ease both; }
+.dark-throne-hall { position:absolute; inset:0; opacity:.72; background:linear-gradient(90deg,transparent 0 17%,#261d22 17% 18%,transparent 18% 82%,#261d22 82% 83%,transparent 83%),linear-gradient(180deg,transparent 72%,#110d10 72%); }
+.dark-throne { position:absolute; left:50%; bottom:21%; width:150px; height:230px; transform:translateX(-50%); border:8px solid #47332c; background:linear-gradient(90deg,#160f13,#4b1823 48%,#160f13); clip-path:polygon(17% 0,35% 10%,50% 0,65% 10%,83% 0,100% 100%,0 100%); box-shadow:0 0 70px #7f1d1d22; }
+.dark-king,.dark-assistant { position:absolute; left:47%; bottom:16%; width:46px; height:92px; border-radius:42% 42% 12% 12%; background:#090b10; box-shadow:0 0 0 2px #414854; transition:all 1.8s ease; }
+.dark-assistant { left:52%; bottom:13%; height:82px; transform:rotate(72deg); transform-origin:bottom; background:#291217; box-shadow:0 0 25px #7f1d1d66; }
+.dark-ending-caption,.dark-victory-panel { position:absolute; z-index:2; left:50%; top:50%; display:flex; width:min(90vw,850px); transform:translate(-50%,-50%); flex-direction:column; align-items:center; padding:28px; animation:dark-caption-in 1s ease both; text-shadow:0 2px 12px #000; }
+.dark-ending-memory::after { content:""; position:absolute; inset:0; pointer-events:none; background:#fff; animation:memory-flash 1.25s ease-out both; mix-blend-mode:screen; }
+.dark-ending-farewell .dark-king { left:49%; bottom:15%; transform:rotate(20deg); }.dark-ending-farewell .dark-assistant { left:51%; bottom:14%; transform:rotate(86deg); opacity:.65; }
+.dark-ending-throne .dark-king,.dark-ending-victory .dark-king { left:50%; bottom:24%; transform:translateX(-50%); }.dark-ending-throne .dark-assistant,.dark-ending-victory .dark-assistant { opacity:.22; }
+.dark-victory-panel { max-width:680px; border-block:1px solid #fda4af44; background:linear-gradient(90deg,transparent,#050306ee 12% 88%,transparent); }
+.dark-credits { animation:credits-rise 8s ease-out both; }
+.dark-ending button { transition:.2s ease; }.dark-ending button:hover { border-color:#fde68a; background:#fde68a18; transform:translateY(-2px); }
+@keyframes dark-fade-in { from{opacity:0}to{opacity:1} }
+@keyframes dark-caption-in { from{opacity:0;transform:translate(-50%,-44%)}to{opacity:1;transform:translate(-50%,-50%)} }
+@keyframes memory-flash { 0%{opacity:1}35%{opacity:.72}100%{opacity:0} }
+@keyframes credits-rise { from{opacity:0;transform:translateY(70px)}to{opacity:1;transform:translateY(-20px)} }
+@media(prefers-reduced-motion:reduce){.dark-ending,.dark-ending-caption,.dark-credits,.dark-ending-memory::after{animation-duration:.01ms}}
+
+.canonical-ending { background:radial-gradient(circle at 50% 25%,#35151d 0,#0b080d 43%,#010102 78%); animation:dark-fade-in 1.2s ease both; user-select:none; }
+.canonical-ending::before { content:""; position:absolute; inset:0; opacity:.22; background:linear-gradient(115deg,transparent 46%,#f59e0b22 49%,transparent 52%),repeating-linear-gradient(90deg,transparent 0 12%,#000 12% 13%); }
+.canonical-hall { position:absolute; inset:0; overflow:hidden; perspective:800px; }
+.canonical-window { position:absolute; left:50%; top:5%; width:min(72vw,620px); height:58%; transform:translateX(-50%); opacity:.34; background:radial-gradient(ellipse at 50% 22%,#f59e0b55,transparent 54%),repeating-linear-gradient(90deg,transparent 0 23%,#08070a 23% 27%); clip-path:polygon(8% 100%,8% 28%,18% 8%,50% 0,82% 8%,92% 28%,92% 100%); }
+.canonical-stage { position:absolute; left:50%; bottom:0; width:min(92vw,900px); height:39%; transform:translateX(-50%) perspective(360px) rotateX(58deg); transform-origin:bottom; background:repeating-linear-gradient(90deg,#171117 0 70px,#271820 72px,#171117 75px); box-shadow:0 -18px 45px #000; }
+.canonical-throne { position:absolute; left:50%; bottom:25%; width:150px; height:220px; transform:translateX(-50%); border:7px solid #513c2c; background:linear-gradient(90deg,#160f13,#5e1d28 50%,#160f13); clip-path:polygon(16% 0,34% 10%,50% 0,66% 10%,84% 0,100% 100%,0 100%); box-shadow:0 0 70px #b453092b; }
+.canonical-king,.canonical-stranger { position:absolute; z-index:2; left:35%; bottom:15%; width:48px; height:96px; border-radius:45% 45% 12% 12%; background:#090b10; box-shadow:0 0 0 2px #586170,0 12px 28px #000; transition:left 2.5s ease,bottom 2.5s ease,transform 1.5s ease; }
+.canonical-stranger { left:47%; bottom:13%; height:88px; transform:rotate(82deg); transform-origin:bottom; background:#160b13; box-shadow:0 0 0 2px #4c1d35,0 0 28px #be123c44; }
+.canonical-held-crown { position:absolute; left:50%; top:-28px; color:#e7bd63; font-size:31px; opacity:0; transform:translateX(-50%); text-shadow:0 0 15px #f59e0b; transition:opacity .6s ease,top 2s ease; }
+.canonical-ending-realization .canonical-king { left:42%; bottom:13%; transform:rotate(24deg); }
+.canonical-ending-ascent .canonical-king { left:49%; bottom:27%; transform:translateX(-50%); }.canonical-ending-ascent .canonical-held-crown { opacity:1; }
+.canonical-ending-throne .canonical-king,.canonical-ending-ending .canonical-king { left:50%; bottom:27%; transform:translateX(-50%) scale(.92); }.canonical-ending-throne .canonical-held-crown,.canonical-ending-ending .canonical-held-crown { top:-18px; opacity:1; }
+.canonical-ending-throne .canonical-stranger,.canonical-ending-ending .canonical-stranger { opacity:.32; }
+.canonical-caption { position:absolute; z-index:5; left:50%; bottom:7%; width:min(90vw,760px); transform:translateX(-50%); padding:18px 24px; background:linear-gradient(90deg,transparent,#030305e8 12% 88%,transparent); text-shadow:0 2px 10px #000; animation:canonical-caption-in .8s ease both; }
+.canonical-caption small { color:#fda4af; font-size:10px; font-weight:900; letter-spacing:.38em; text-transform:uppercase; }.canonical-caption p { margin-top:10px; color:#e2e8f0; font-size:clamp(14px,2vw,20px); font-weight:600; line-height:1.65; }
+.canonical-panel { animation:canonical-panel-in 1.1s ease both; }
+.canonical-ending button { transition:.2s ease; }.canonical-ending button:hover { border-color:#fde68a; background:#fde68a18; transform:translateY(-2px); }
+.canonical-credits { animation:credits-rise 8s ease-out both; }
+@keyframes canonical-panel-in { from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)} }
+@keyframes canonical-caption-in { from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)} }
+@media(prefers-reduced-motion:reduce){.canonical-ending,.canonical-panel,.canonical-credits,.canonical-caption{animation-duration:.01ms}.canonical-king,.canonical-stranger,.canonical-held-crown{transition-duration:.01ms}}
+
 .mask-icon {
   position: relative; display: inline-block; width: 25px; height: 28px;
   image-rendering: pixelated; filter: drop-shadow(0 2px 0 #05080b) drop-shadow(0 0 5px rgba(226,232,240,.18));

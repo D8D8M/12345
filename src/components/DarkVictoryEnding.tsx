@@ -1,0 +1,21 @@
+import { useEffect, useState } from 'react';
+
+type Props = { assistantLine: string; onMainMenu: () => void };
+const CREDITS = ['FALSE KNIGHT', 'История, мир и разработка', 'Создано в nFactorial Teens', 'Спасибо за игру'];
+
+export function DarkVictoryEnding({ assistantLine, onMainMenu }: Props) {
+  const [scene, setScene] = useState<'death' | 'memory' | 'farewell' | 'throne' | 'victory' | 'credits'>('death');
+  useEffect(() => {
+    const cues = [window.setTimeout(() => setScene('memory'), 6200), window.setTimeout(() => setScene('farewell'), 10500), window.setTimeout(() => setScene('throne'), 14000), window.setTimeout(() => setScene('victory'), 18000)];
+    return () => cues.forEach(window.clearTimeout);
+  }, []);
+  if (scene === 'credits') return <div className="dark-ending fixed inset-0 z-[140] grid place-items-center bg-black px-6 text-center"><div className="dark-credits space-y-8">{CREDITS.map((line, index) => <p key={line} className={index === 0 ? 'text-4xl font-black tracking-[.2em] text-amber-100' : 'text-sm uppercase tracking-[.28em] text-slate-400'}>{line}</p>)}</div><button onClick={() => setScene('victory')} className="absolute bottom-8 border border-white/20 px-5 py-3 text-xs font-black uppercase tracking-[.18em] text-slate-300">Назад</button></div>;
+  return <div className={`dark-ending dark-ending-${scene} fixed inset-0 z-[140] overflow-hidden bg-black text-center`}>
+    <div className="dark-throne-hall" aria-hidden="true"><div className="dark-throne"/><div className="dark-king"/><div className="dark-assistant"/></div>
+    {scene === 'death' && <section className="dark-ending-caption"><p className="text-[10px] font-black uppercase tracking-[.42em] text-rose-400">Последний приказ</p><p className="mt-5 max-w-3xl text-lg font-semibold leading-8 text-slate-100 md:text-2xl">Помощник падает на холодный мрамор. На его губах выступает кровь.</p><blockquote className="mt-6 max-w-3xl border-y border-rose-400/25 py-5 text-base italic leading-8 text-rose-100 md:text-xl">«{assistantLine}»</blockquote></section>}
+    {scene === 'memory' && <section className="dark-ending-caption dark-flashback"><p className="text-xs font-black uppercase tracking-[.5em] text-amber-200">Озарение</p><p className="mt-6 max-w-3xl text-xl font-black leading-9 text-white md:text-3xl">Память возвращается ослепительной вспышкой.</p><p className="mt-5 max-w-2xl text-base leading-7 text-slate-200">До ритуала забвения вы сами велели Помощнику: «Если я вернусь без разума — не подпускай меня к трону. Даже ценой своей жизни».</p></section>}
+    {scene === 'farewell' && <section className="dark-ending-caption"><p className="max-w-2xl text-xl font-semibold leading-9 text-slate-200 md:text-3xl">Помощник умирает на руках Короля.</p><p className="mt-4 text-xs uppercase tracking-[.35em] text-slate-600">На этот раз приказ исполнен до конца</p></section>}
+    {scene === 'throne' && <section className="dark-ending-caption"><p className="text-xl font-semibold tracking-wide text-slate-300 md:text-3xl">Король поднимается по ступеням и садится на Трон.</p><p className="mt-5 text-xs uppercase tracking-[.55em] text-slate-600">В абсолютной тишине</p></section>}
+    {scene === 'victory' && <section className="dark-victory-panel"><p className="text-[10px] font-black uppercase tracking-[.5em] text-rose-400">Мрачный финал</p><h1 className="mt-4 text-3xl font-black uppercase tracking-[.08em] text-amber-100 md:text-5xl">👑 Трон одиночества</h1><p className="mt-7 text-sm leading-7 text-slate-300 md:text-base">Вы прошли сквозь весь замок, убили Незнакомца и сразили собственного Помощника, который до последнего вздоха исполнял <strong className="text-rose-200">ВАШ собственный приказ</strong>.</p><p className="mt-5 text-sm leading-7 text-slate-300 md:text-base">Вы вернули свой Трон... но цена за это — абсолютное одиночество на руинах собственного королевства.</p><div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row"><button onClick={() => setScene('credits')} className="border border-amber-200/45 bg-amber-200/10 px-6 py-3 text-xs font-black uppercase tracking-[.16em] text-amber-100">Просмотр титров</button><button onClick={onMainMenu} className="border border-white/20 px-6 py-3 text-xs font-black uppercase tracking-[.16em] text-slate-300">Главное меню</button></div></section>}
+  </div>;
+}
