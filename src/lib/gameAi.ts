@@ -17,7 +17,7 @@ const askGameAi = async (prompt: string, fallback: string): Promise<string> => {
     const { data, error } = await supabase.functions.invoke('ai', {
       body: {
         prompt,
-        system: 'Ты внутриигровой рассказчик мрачной русскоязычной игры «Путь к престолу». Отвечай только запрошенным текстом, без markdown, безопасно и не более 35 слов.',
+        system: 'Ты внутриигровой рассказчик мрачной русскоязычной игры «Восхождение к престолу». Отвечай только запрошенным текстом, без markdown, безопасно и не более 35 слов.',
       },
     });
     if (error) throw error;
