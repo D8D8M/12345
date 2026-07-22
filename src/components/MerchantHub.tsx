@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { drawPlayerCape, drawPlayerKnight } from '../game/drawPlayerKnight';
 import { drawPlayerSword } from '../game/drawCombatAnimations';
 import { drawLocationBackdrop, type ParallaxLocation } from '../game/drawParallaxBackground';
+import { drawPrisonRefuge } from '../game/drawPrisonRefuge';
 
 type StationId = 'forge' | 'alchemist' | 'weapons' | 'evolution';
 
@@ -25,6 +26,7 @@ function HubBackdrop({ location }: { location: Props['origin'] }) {
       const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.scale(ratio, ratio);
       const w = innerWidth, h = innerHeight;
       drawLocationBackdrop(ctx, location as ParallaxLocation, w, h);
+      if (location === 'prison') drawPrisonRefuge(ctx, w, h);
     };
     draw(); window.addEventListener('resize', draw); return () => window.removeEventListener('resize', draw);
   }, [location]);
