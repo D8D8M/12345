@@ -70,8 +70,20 @@ export const drawThroneRoom = (ctx: CanvasRenderingContext2D, room: ThroneRoomBo
   for (const x of [left + 205, left + 645, left + 1080, left + 1325, left + width - 265]) drawBanner(ctx, x, top + 72 + (x % 3) * 5);
   drawBlueTorch(ctx, left + 148, top + 300, time, 0); drawBlueTorch(ctx, left + 653, top + 330, time, 1.7); drawBlueTorch(ctx, left + width - 117, top + 300, time, 3.2);
 
-  ctx.fillStyle = '#17171d'; ctx.fillRect(left, floor - 36, width, 36);
-  ctx.strokeStyle = '#46414b'; ctx.lineWidth = 3; for (let x = left + 80; x < left + width; x += 155) { ctx.beginPath(); ctx.moveTo(x, floor); ctx.lineTo(x + 48, floor - 36); ctx.lineTo(x + 102, floor - 10); ctx.stroke(); }
+  // A normal stone walking surface sits over a visible brick foundation,
+  // matching the layered floors used throughout the other locations.
+  ctx.fillStyle = '#372a22'; ctx.fillRect(left, floor + 10, width, 92);
+  ctx.fillStyle = '#171116';
+  for (let y = floor + 10, row = 0; y < floor + 102; y += 24, row++) {
+    ctx.fillRect(left, y, width, 4);
+    for (let x = left + (row % 2 ? 52 : 104); x < left + width; x += 104) ctx.fillRect(x, y, 4, 24);
+  }
+  const floorStone = ctx.createLinearGradient(0, floor - 14, 0, floor + 12);
+  floorStone.addColorStop(0, '#a19a92'); floorStone.addColorStop(.28, '#716c67'); floorStone.addColorStop(1, '#3f3b3a');
+  ctx.fillStyle = floorStone; ctx.fillRect(left, floor - 14, width, 26);
+  ctx.fillStyle = '#d1ccc4'; ctx.fillRect(left, floor - 14, width, 4);
+  ctx.strokeStyle = '#302d2d'; ctx.lineWidth = 3;
+  for (let x = left + 125; x < left + width; x += 150) { ctx.beginPath(); ctx.moveTo(x, floor - 12); ctx.lineTo(x - 18, floor + 10); ctx.stroke(); }
   const carpetLeft = left + 86, carpetRight = throneX + 125;
   ctx.fillStyle = '#571124'; ctx.beginPath(); ctx.moveTo(carpetLeft, floor); ctx.lineTo(carpetLeft + 26, floor - 23); ctx.lineTo(carpetRight - 18, floor - 23); ctx.lineTo(carpetRight, floor); ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#98652f'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(carpetLeft + 10, floor - 2); ctx.lineTo(carpetLeft + 32, floor - 20); ctx.moveTo(carpetRight - 9, floor - 2); ctx.lineTo(carpetRight - 24, floor - 20); ctx.stroke();

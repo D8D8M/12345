@@ -102,7 +102,9 @@ export const drawFinalStoneWall = (ctx: CanvasRenderingContext2D, wall: FinalBox
     ctx.strokeStyle = row % 3 === 0 ? '#77716b' : '#555250';
     ctx.beginPath(); ctx.moveTo(wall.x + 3, y); ctx.lineTo(wall.x + wall.w - 3, y); ctx.stroke();
     const offset = row % 2 ? wall.w * .32 : wall.w * .68;
-    ctx.beginPath(); ctx.moveTo(wall.x + offset, y); ctx.lineTo(wall.x + offset, Math.min(y + courseH, wall.y + wall.h)); ctx.stroke();
+    // Keep vertical joints detached from horizontal courses so the masonry
+    // never forms a cross-shaped mark on the throne-room door.
+    ctx.beginPath(); ctx.moveTo(wall.x + offset, y + 8); ctx.lineTo(wall.x + offset, Math.min(y + courseH - 8, wall.y + wall.h)); ctx.stroke();
   }
 
   ctx.restore();
