@@ -7,6 +7,7 @@ export type CastleBanner = { x: number; y: number; color: 'red' | 'blue'; crest:
 export type CastleArch = { x: number; y: number; w: number; h: number };
 export type CastleCarpet = { x: number; y: number; w: number; h: number };
 export type CastleStaircase = { x: number; y: number; h: number };
+export type CastleWall = { x: number; y: number; w: number; h: number };
 
 export type CastleLevel = {
   torches: CastleTorch[];
@@ -14,6 +15,7 @@ export type CastleLevel = {
   arches: CastleArch[];
   carpets: CastleCarpet[];
   staircases: CastleStaircase[];
+  walls: CastleWall[];
 };
 
 /** Decorative layout derived from the room grid, with mirrored left/right details. */
@@ -23,8 +25,10 @@ export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: num
   const arches: CastleArch[] = [];
   const carpets: CastleCarpet[] = [];
   const staircases: CastleStaircase[] = [];
+  const walls: CastleWall[] = [];
 
   for (const room of rooms) {
+    walls.push({ x: room.x + 42, y: room.y + 42, w: roomW - 84, h: roomH - 84 });
     const floor = room.y + roomH - 42;
     carpets.push({ x: room.x + 76, y: floor - 12, w: roomW - 152, h: 12 });
     arches.push({ x: room.x + roomW / 2 - 210, y: room.y + 110, w: 420, h: Math.min(520, roomH * .48) });
@@ -39,5 +43,5 @@ export const createCastleLevel = (rooms: CastleRoom[], roomW: number, roomH: num
     }
     if (room.connections.has(room.id - columns)) staircases.push({ x: room.x + roomW / 2, y: room.y + 48, h: roomH - 96 });
   }
-  return { torches, banners, arches, carpets, staircases };
+  return { torches, banners, arches, carpets, staircases, walls };
 };

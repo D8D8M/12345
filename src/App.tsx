@@ -3012,7 +3012,7 @@ export default function App() {
       }
       ctx.fillStyle = theme.mist; if (!bridgeLayout && !castleLayout) for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(((i * 390 - camera * .08 + now * 8) % 1700) - 180, 470 + i * 42, 250, 38, 0, 0, Math.PI * 2); ctx.fill(); }
       const sceneZoom = ZOOM + (finaleSequence ? .16 : 0); ctx.save(); ctx.scale(sceneZoom, sceneZoom); ctx.translate(-camera, -cameraY);
-      if (!swampLayout && !cryptLayout) for (const room of rooms) {
+      if (!swampLayout && !cryptLayout && !castleLayout) for (const room of rooms) {
         ctx.fillStyle = castleLayout ? ((room.col + room.row) % 2 ? 'rgba(33,23,42,.3)' : 'rgba(25,26,44,.3)') : cryptLayout ? 'rgba(3,1,10,.44)' : room.connections.size === 1 ? 'rgba(45,64,61,.16)' : 'rgba(8,14,18,.16)';
         ctx.fillRect(room.x + wall, room.y + wall, roomW - wall * 2, roomH - wall * 2);
         ctx.strokeStyle = castleLayout ? 'rgba(224,185,79,.2)' : cryptLayout ? 'rgba(22,140,255,.08)' : 'rgba(255,255,255,.035)'; ctx.lineWidth = 3;

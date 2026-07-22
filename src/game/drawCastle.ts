@@ -11,6 +11,21 @@ const drawFlame = (ctx: CanvasRenderingContext2D, x: number, y: number, phase: n
 };
 
 export const drawCastleBackdrop = (ctx: CanvasRenderingContext2D, level: CastleLevel, time: number) => {
+  for (const wall of level.walls) {
+    ctx.fillStyle = '#4b382d';
+    ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+    ctx.fillStyle = 'rgba(27,19,25,.48)';
+    for (let y = wall.y; y < wall.y + wall.h; y += 52) {
+      const row = Math.floor((y - wall.y) / 52);
+      for (let x = wall.x - (row % 2) * 65; x < wall.x + wall.w; x += 130) {
+        ctx.fillRect(x, y + 45, 122, 7);
+        ctx.fillRect(x + 122, y, 8, 52);
+      }
+    }
+    ctx.strokeStyle = 'rgba(214,173,75,.22)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+  }
   for (const arch of level.arches) {
     ctx.fillStyle = '#15182a'; ctx.fillRect(arch.x, arch.y + arch.h * .42, arch.w, arch.h * .58);
     ctx.beginPath(); ctx.arc(arch.x + arch.w / 2, arch.y + arch.h * .42, arch.w / 2, Math.PI, 0); ctx.fill();
