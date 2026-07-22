@@ -745,9 +745,6 @@ export default function App() {
       const candidates = roomNeighbors(room).filter((id) => !room.connections.has(id));
       if (candidates.length) { const next = candidates[Math.floor(Math.random() * candidates.length)]; room.connections.add(next); rooms[next].connections.add(room.id); }
     }
-    const loreMessages = ['Подземелье защищает этот мир от ТЕБЯ...', 'Не дайте ему вспомнить, кто он на самом деле', 'Царь возвращается к своему трону...'];
-    const loreSigns = throneScene ? [] : rooms.filter(() => Math.random() < .24).map((room, index) => ({ x: room.x + 90 + Math.random() * (roomW - 360), y: room.y + 105 + Math.random() * 170, text: loreMessages[index % loreMessages.length], alpha: .12 + Math.random() * .1 }));
-
     const terrain: Box[] = [], ceilings: Box[] = [], dividers: Box[] = [], oneWays: Box[] = [];
     const swampLevel = swampLayout ? createSwampLevel() : null;
     const swampPlatforms: SwampPlatform[] = swampLevel?.platforms ?? [];
@@ -3060,7 +3057,6 @@ export default function App() {
         ctx.fillRect(column.x - 17, column.y + column.h - 22, column.w + 34, 22);
         ctx.globalAlpha = 1;
       }
-      ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; for (const sign of loreSigns) { ctx.globalAlpha = sign.alpha; ctx.fillStyle = '#c9a46a'; ctx.fillText(sign.text, sign.x, sign.y); ctx.fillStyle = '#4b1d22'; ctx.fillRect(sign.x - 8, sign.y + 7, 4, 4); } ctx.globalAlpha = 1;
       if (tutorialActive && !introDialogueOpen.current) {
         const progress = tutorialProgress.current;
         const drawTutorialPanel = (x: number, y: number, lines: string[]) => {
